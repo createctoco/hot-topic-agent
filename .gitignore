@@ -1,0 +1,35 @@
+# ============================================
+# .gitignore
+# ============================================
+
+# 敏感文件
+.env
+config.yaml
+
+# 数据文件
+data/logs/
+data/cache/
+data/articles/
+data/published.json
+data/.toutiao-session
+data/auth/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Node.js
+node_modules/
+
+# 系统
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# 编辑器
+.vscode/
+.idea/

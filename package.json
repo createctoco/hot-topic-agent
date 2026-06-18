@@ -1,0 +1,12 @@
+{
+  "name": "hot-topic-agent",
+  "version": "1.0.0",
+  "description": "热搜自动发文系统 - 采集热搜 -> AI写文章 -> 自动发头条",
+  "scripts": {
+    "start": "node publish_helper.js",
+    "setup": "npm install && npx playwright install chromium"
+  },
+  "dependencies": {
+    "@openclaw-cn/toutiao-ops": "latest"
+  }
+}

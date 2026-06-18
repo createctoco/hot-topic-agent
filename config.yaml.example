@@ -1,0 +1,40 @@
+# ============================================
+# 热搜自动发文系统 配置模板
+# 复制此文件为 config.yaml 并修改
+# ============================================
+
+# 每天发布文章数量
+daily_count: 10
+
+# DeepSeek API 配置
+deepseek:
+  api_key: "sk-your-deepseek-api-key"  # 在 https://platform.deepseek.com/ 获取
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+
+# 发布配置
+publish:
+  first_publish: true      # 声明头条首发
+  ai_declared: true        # 声明AI生成内容
+  interval_seconds: 90     # 每篇发布间隔（秒）
+
+# 热搜采集配置
+hot_search:
+  platforms:               # 启用的热搜平台
+    - baidu
+    - weibo
+    - zhihu
+    - toutiao
+  request_interval: 0.5    # 请求间隔（秒）
+
+# 关键词领域配置
+categories:
+  - 跨境电商
+  - 外贸
+  - AI
+  - 科技
+
+# 日志配置
+logging:
+  level: INFO
+  save_days: 30            # 日志保留天数

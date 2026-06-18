@@ -1,0 +1,32 @@
+# ============================================
+# 热搜自动发文系统 - Docker Compose
+# 宝塔面板部署用：docker-compose up -d
+# ============================================
+version: "3.8"
+
+services:
+  hot-topic-agent:
+    build: .
+    container_name: hot-topic-agent
+    restart: unless-stopped
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - NON_INTERACTIVE=1
+      - TZ=Asia/Shanghai
+    volumes:
+      # 持久化数据（发布记录、日志、登录会话）
+      - ./data:/app/data
+      # 配置文件
+      - ./config.yaml:/app/config.yaml:ro
+    # 模式选择：
+    #   scheduler - 启动定时调度（每天10篇，8:00-22:00自动发）
+    #   once      - 只执行一次然后退出
+    #   login     - 登录头条（需要 VNC 或本地执行）
+    command: ["python3", "main.py"]
+    
+    # 资源限制（Playwright 吃内存）
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"

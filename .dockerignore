@@ -1,0 +1,13 @@
+node_modules
+__pycache__
+*.pyc
+data/logs/*
+data/cache/*
+data/articles/*
+.git
+.env
+*.md
+deploy/
+.github/
+run.bat
+templates/

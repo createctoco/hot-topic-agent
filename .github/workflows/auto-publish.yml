@@ -1,0 +1,135 @@
+# ============================================
+# 热搜自动发文 - GitHub Actions 工作流
+# 每天 8:00-22:00（北京时间）每2小时自动发文1篇
+# ============================================
+name: 热搜自动发文
+
+on:
+  # 定时触发（UTC时间，北京时间 = UTC+8）
+  # 0:00 UTC = 8:00 北京, 14:00 UTC = 22:00 北京
+  schedule:
+    - cron: "0 0,2,4,6,8,10,12,14 * * *"  # 每2小时，共8次
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "本次发布文章数量"
+        required: false
+        default: "1"
+      dry_run:
+        description: "仅生成不发布（保存为产物）"
+        required: false
+        default: "false"
+
+# 同一时间只允许一个实例运行
+concurrency:
+  group: hot-topic-agent
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ====== 1. 检出代码 ======
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      # ====== 2. 安装 Python ======
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ====== 3. 安装 Node.js ======
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # ====== 4. 安装 Playwright 浏览器 ======
+      - name: 安装 Playwright
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      # ====== 5. 安装 Python 依赖 ======
+      - name: 安装 Python 依赖
+        run: |
+          pip install -r requirements.txt
+
+      # ====== 6. 恢复登录会话（从 Cache） ======
+      - name: 恢复登录会话
+        id: restore-session
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/.toutiao-session
+            data/auth
+          key: toutiao-session-${{ github.run_id }}
+          restore-keys: |
+            toutiao-session-
+
+      # ====== 7. 恢复发布历史 ======
+      - name: 恢复发布历史
+        uses: actions/cache@v4
+        with:
+          path: data/published.json
+          key: published-history-${{ github.run_id }}
+          restore-keys: |
+            published-history-
+
+      # ====== 8. 配置环境变量 ======
+      - name: 配置环境变量
+        run: |
+          echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}" >> $GITHUB_ENV
+          echo "NON_INTERACTIVE=1" >> $GITHUB_ENV
+          echo "TZ=Asia/Shanghai" >> $GITHUB_ENV
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+
+      # ====== 9. 执行发文 ======
+      - name: 执行发文
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          echo "=== 开始执行 ==="
+          COUNT="${{ github.event.inputs.count || '1' }}"
+          DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Dry run 模式：仅生成文章，不发布"
+            python3 main.py --test-filter || true
+          else
+            python3 main.py --once --count $COUNT || true
+          fi
+
+      # ====== 10. 上传生成的文章（作为产物） ======
+      - name: 上传文章产物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: articles-${{ github.run_number }}
+          path: |
+            data/articles/
+            data/logs/
+          retention-days: 7
+
+      # ====== 11. 保存登录会话 ======
+      - name: 保存登录会话
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/.toutiao-session
+            data/auth
+          key: toutiao-session-${{ github.run_id }}
+
+      # ====== 12. 保存发布历史 ======
+      - name: 保存发布历史
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: data/published.json
+          key: published-history-${{ github.run_id }}
