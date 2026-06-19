@@ -15,11 +15,11 @@ on:
       count:
         description: "本次发布文章数量"
         required: false
-        default: "1"
+        default: "10"
       dry_run:
         description: "仅生成不发布（true=只写文章不发头条）"
         required: false
-        default: "false"
+        default: "true"
 
 # 同一时间只允许一个实例运行
 concurrency:
@@ -131,13 +131,18 @@ jobs:
           TZ: "Asia/Shanghai"
         run: |
           echo "=== 开始执行 $(date) ==="
-          COUNT="${{ github.event.inputs.count || '1' }}"
-          DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
+          COUNT="${{ github.event.inputs.count }}"
+          DRY_RUN="${{ github.event.inputs.dry_run }}"
+
+          # 默认值
+          if [ -z "$COUNT" ]; then COUNT="10"; fi
+          if [ -z "$DRY_RUN" ]; then DRY_RUN="true"; fi
 
           if [ "$DRY_RUN" = "true" ]; then
             echo "Dry run 模式：仅生成文章，不发布到头条"
-            python3 main.py --test-filter
+            python3 main.py --once --dry-run --count $COUNT
           else
+            echo "正式发布模式"
             python3 main.py --once --count $COUNT
           fi
 
