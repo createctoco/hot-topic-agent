@@ -1,88 +1,93 @@
 """
-今日头条自动发布模块（纯 Python 实现）
-使用 Python Playwright 直接操作浏览器，彻底绕过 toutiao-ops 的权限问题
+今日头条自动发布模块
+使用 node 直接运行 toutiao-ops/index.js，彻底绕过 npx 权限问题
 """
 import json
 import os
+import subprocess
 import logging
-import time
-import random
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# 浏览器数据目录（与 toutiao-ops 共享，Cookie 通用）
-DEFAULT_DATA_DIR = os.path.expanduser("~/.toutiao-ops/accounts/default/browser-data")
+# 项目根目录
+PROJECT_ROOT = Path(__file__).parent.parent
 
-# 头条发布页 URL
-PUBLISH_URL = "https://mp.toutiao.com/profile_v4/graphic/publish"
-
-# 标题长度限制
-TITLE_MAX_LEN = 30
-TITLE_MIN_LEN = 2
+# 头条发布页 URL（用于检查登录状态）
+LOGIN_CHECK_URL = "https://mp.toutiao.com/profile_v4/home"
 
 
 class ToutiaoPublisher:
     def __init__(self, work_dir: str = "."):
         """
         初始化发布器
-        work_dir: 工作目录
+        work_dir: 工作目录（toutiao-ops 的安装目录）
         """
-        self.work_dir = work_dir
-        self.data_dir = os.environ.get("TOUTIAO_DATA_DIR", DEFAULT_DATA_DIR)
-        os.makedirs(self.data_dir, exist_ok=True)
-        logger.info(f"浏览器数据目录: {self.data_dir}")
-        self._check_playwright()
+        self.work_dir = Path(work_dir).resolve()
+        self._check_environment()
 
-    def _check_playwright(self):
-        """检查 Playwright 是否安装"""
+    def _check_environment(self):
+        """检查运行环境"""
+        # 检查 node 是否可用
         try:
-            import playwright
-            logger.info(f"Playwright 已安装: {playwright.__version__}")
-        except ImportError:
-            logger.warning("Playwright 未安装，正在安装...")
-            import subprocess
-            subprocess.run(
-                ["pip", "install", "playwright"],
-                check=True,
+            result = subprocess.run(
+                ["node", "--version"],
                 capture_output=True,
-            )
-            subprocess.run(
-                ["playwright", "install", "chromium"],
+                text=True,
                 check=True,
-                capture_output=True,
             )
-            logger.info("Playwright 安装完成")
+            logger.info(f"Node.js: {result.stdout.strip()}")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            raise RuntimeError("Node.js 未安装，请先安装 Node.js")
+
+        # 检查 toutiao-ops 是否安装
+        toutiao_js = self.work_dir / "node_modules" / "@openclaw-cn" / "toutiao-ops" / "index.js"
+        if not toutiao_js.exists():
+            logger.warning(f"toutiao-ops 未安装，正在安装...")
+            subprocess.run(
+                ["npm", "install", "@openclaw-cn/toutiao-ops"],
+                cwd=self.work_dir,
+                check=True,
+            )
+            logger.info("toutiao-ops 安装完成")
+
+    def _run_toutiao_cmd(self, args: list, timeout: int = 120) -> dict:
+        """
+        运行 toutiao-ops 命令（用 node 直接运行 index.js，绕过 npx 权限问题）
+        """
+        # 直接运行 index.js，不用 npx
+        index_js = self.work_dir / "node_modules" / "@openclaw-cn" / "toutiao-ops" / "index.js"
+        
+        if not index_js.exists():
+            return {"success": False, "message": f"toutiao-ops 未找到: {index_js}"}
+
+        cmd = ["node", str(index_js)] + args
+        logger.info(f"执行命令: {' '.join(cmd[:3])} ...")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                cwd=self.work_dir,
+            )
+            output = result.stdout + result.stderr
+
+            if result.returncode == 0:
+                return {"success": True, "message": "命令执行成功", "output": output}
+            else:
+                return {"success": False, "message": output}
+
+        except subprocess.TimeoutExpired:
+            return {"success": False, "message": f"命令超时（{timeout}秒）"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
 
     def check_login(self) -> bool:
         """检查登录状态"""
-        try:
-            from playwright.sync_api import sync_playwright
-
-            with sync_playwright() as p:
-                context = p.chromium.launch_persistent_context(
-                    self.data_dir,
-                    headless=True,
-                    locale="zh-CN",
-                    timezone_id="Asia/Shanghai",
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                        "--disable-infobars",
-                    ],
-                )
-                page = context.pages[0] if context.pages else context.new_page()
-                page.goto("https://mp.toutiao.com/profile_v4/home", timeout=30000)
-                time.sleep(3)
-
-                # 检查是否有登录按钮或登录态特征
-                is_logged_in = "login" not in page.url() and page.locator("text=创作").count() > 0
-                context.close()
-                return is_logged_in
-        except Exception as e:
-            logger.warning(f"检查登录状态失败: {e}")
-            return False
+        result = self._run_toutiao_cmd(["auth", "status"])
+        return result["success"] and "已登录" in result.get("message", "")
 
     def publish_article(
         self,
@@ -106,256 +111,36 @@ class ToutiaoPublisher:
 
         返回: {"success": bool, "message": str}
         """
+        # 1. 保存正文到临时文件
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".html", delete=False) as f:
+            content_file = f.name
+            f.write(content)
+        logger.info(f"正文已保存到: {content_file}")
+
+        # 2. 构建命令参数
+        args = ["publish", "article"]
+        args += ["--title", title]
+        args += ["--content-file", content_file]
+
+        if first_publish:
+            args.append("--first-publish")
+
+        if ai_declared:
+            args.append("--ai-declared")
+
+        # 免费图库配图
+        if cover_keyword:
+            args += ["--cover-free", "--cover-keyword", cover_keyword]
+
+        # 3. 执行发布命令
+        logger.info(f"发布文章: [{category}] {title}")
+        result = self._run_toutiao_cmd(args, timeout=180)
+
+        # 4. 清理临时文件
         try:
-            from playwright.sync_api import sync_playwright
-
-            # 标题长度检查
-            if len(title) < TITLE_MIN_LEN:
-                return {"success": False, "message": f"标题过短（至少 {TITLE_MIN_LEN} 字）"}
-            if len(title) > TITLE_MAX_LEN:
-                title = title[:TITLE_MAX_LEN]
-                logger.warning(f"标题已截断为: {title}")
-
-            with sync_playwright() as p:
-                context = p.chromium.launch_persistent_context(
-                    self.data_dir,
-                    headless=True,
-                    locale="zh-CN",
-                    timezone_id="Asia/Shanghai",
-                    viewport={"width": 1440, "height": 900},
-                    args=[
-                        "--disable-blink-features=AutomationControlled",
-                        "--no-first-run",
-                        "--no-default-browser-check",
-                        "--disable-infobars",
-                    ],
-                )
-                page = context.pages[0] if context.pages else context.new_page()
-
-                try:
-                    # 1. 打开发布页
-                    logger.info("正在打开发布页...")
-                    page.goto(PUBLISH_URL, timeout=60000, wait_until="domcontentloaded")
-                    self._human_sleep(2, 4)
-
-                    # 关闭可能的弹窗
-                    self._dismiss_overlays(page)
-
-                    # 2. 填写标题
-                    logger.info(f"填写标题: {title}")
-                    self._fill_title(page, title)
-                    self._human_sleep(1, 2)
-
-                    # 3. 填写正文
-                    logger.info("填写正文...")
-                    self._fill_content(page, content)
-                    self._human_sleep(1, 2)
-
-                    # 4. 设置封面（免费图库）
-                    if cover_keyword:
-                        logger.info(f"使用免费图库，关键词: {cover_keyword}")
-                        self._set_cover_free(page, cover_keyword)
-                        self._human_sleep(1, 2)
-
-                    # 5. 勾选"头条首发"
-                    if first_publish:
-                        logger.info("勾选头条首发...")
-                        self._click_label(page, "头条首发")
-                        self._human_sleep(0.5, 1)
-
-                    # 6. 勾选"AI 声明"（如果启用）
-                    if ai_declared:
-                        logger.info("勾选 AI 声明...")
-                        self._click_label(page, "AI")
-                        self._human_sleep(0.5, 1)
-
-                    # 7. 点击"预览并发布"
-                    logger.info("点击预览并发布...")
-                    self._dismiss_overlays(page)
-                    publish_btn = page.locator('button:has-text("预览并发布")').first
-                    publish_btn.scroll_into_view_if_needed(timeout=10000)
-                    self._human_sleep(0.5, 1)
-                    publish_btn.click(force=True)
-                    self._human_sleep(3, 5)
-
-                    # 8. 确认发布（预览页）
-                    logger.info("确认发布...")
-                    self._dismiss_overlays(page)
-                    confirm_btn = page.locator('button:has-text("确认发布"), button:has-text("发布")').first
-                    confirm_btn.click(timeout=10000, force=True)
-                    self._human_sleep(3, 5)
-
-                    # 9. 可能的二次确认
-                    self._dismiss_overlays(page)
-                    final_confirm = page.locator('button:has-text("确定"), button:has-text("确认")').first
-                    final_confirm.click(timeout=5000, force=True).catch(lambda _: None)
-                    self._human_sleep(2, 4)
-
-                    logger.info(f"发布成功: {title}")
-                    context.close()
-                    return {"success": True, "message": "发布成功"}
-
-                except Exception as e:
-                    # 截图保存错误信息
-                    try:
-                        screenshot_path = os.path.join(
-                            self.work_dir, "data", "logs", f"error_{int(time.time())}.png"
-                        )
-                        os.makedirs(os.path.dirname(screenshot_path), exist_ok=True)
-                        page.screenshot(path=screenshot_path)
-                        logger.error(f"发布失败，截图已保存: {screenshot_path}")
-                    except:
-                        pass
-                    context.close()
-                    raise e
-
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"发布失败: {error_msg}")
-            return {"success": False, "message": error_msg}
-
-    def _fill_title(self, page, title: str):
-        """填写标题"""
-        selectors = [
-            'textarea[placeholder*="标题"]',
-            'input[placeholder*="标题"]',
-            '[class*="title"] textarea',
-            '[class*="title"] input',
-        ]
-        for selector in selectors:
-            try:
-                el = page.locator(selector).first
-                if el.count() > 0:
-                    el.click(force=True)
-                    self._human_sleep(0.3, 0.6)
-                    page.keyboard.type(title, delay=50 + random.randint(0, 80))
-                    return
-            except:
-                continue
-
-    def _fill_content(self, page, content: str):
-        """填写正文（HTML 转纯文本分段输入）"""
-        # 找到编辑器
-        editor_selectors = [
-            '[contenteditable="true"]',
-            '[class*="editor"]',
-            'div[role="textbox"]',
-        ]
-        editor = None
-        for selector in editor_selectors:
-            try:
-                el = page.locator(selector).first
-                if el.count() > 0:
-                    editor = el
-                    break
-            except:
-                continue
-
-        if not editor:
-            raise Exception("找不到正文编辑器")
-
-        editor.click(force=True)
-        self._human_sleep(0.3, 0.6)
-
-        # 分段输入（模拟人类打字）
-        paragraphs = content.replace("<p>", "").replace("</p>", "\n").split("\n")
-        for i, para in enumerate(paragraphs):
-            para = para.strip()
-            if not para:
-                page.keyboard.press("Enter")
-                self._human_sleep(0.1, 0.3)
-                continue
-            # 去除 HTML 标签
-            import re
-            para = re.sub(r"<[^>]+>", "", para)
-            if para:
-                page.keyboard.type(para, delay=30 + random.randint(0, 50))
-                self._human_sleep(0.1, 0.3)
-                page.keyboard.press("Enter")
-                self._human_sleep(0.3, 0.8)
-
-    def _set_cover_free(self, page, keyword: str):
-        """使用免费图库设置封面"""
-        try:
-            # 点击"免费图库"标签
-            free_tab = page.locator('text=免费图库').first
-            free_tab.click(timeout=5000)
-            self._human_sleep(1, 2)
-
-            # 搜索关键词
-            search_input = page.locator('input[type="text"], input[placeholder*="搜索"]').first
-            search_input.fill(keyword or "科技")
-            self._human_sleep(0.5, 1)
-            page.keyboard.press("Enter")
-            self._human_sleep(2, 3)
-
-            # 选择第一张图片
-            first_img = page.locator('[class*="image-item"] img, [class*="img-item"] img').first
-            first_img.click(timeout=10000)
-            self._human_sleep(1, 2)
-
-            # 确认选择
-            confirm_btn = page.locator('button:has-text("确定"), button:has-text("确认")').first
-            confirm_btn.click(timeout=5000)
-            self._human_sleep(1, 2)
-
-            logger.info("免费图库选择完成")
-        except Exception as e:
-            logger.warning(f"免费图库选择失败（不阻塞发布）: {e}")
-
-    def _click_label(self, page, label_text: str):
-        """点击勾选框（通过文本找到对应 label）"""
-        try:
-            el = page.locator(f'text={label_text}').first
-            el.scroll_into_view_if_needed(timeout=5000)
-            el.click(timeout=5000)
+            os.unlink(content_file)
         except:
             pass
 
-    def _dismiss_overlays(self, page):
-        """关闭弹窗、遮罩"""
-        try:
-            page.evaluate("""
-                () => {
-                    // 关闭所有 modal
-                    document.querySelectorAll('.byte-modal-wrapper, [class*="modal"], [class*="drawer"]').forEach(el => {
-                        el.style.display = 'none';
-                    });
-                    // 按 Escape
-                    document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'}));
-                }
-            """)
-        except:
-            pass
-        self._human_sleep(0.3, 0.5)
-
-    def _human_sleep(self, min_sec: float, max_sec: float):
-        """随机延迟（模拟人类操作）"""
-        time.sleep(min_sec + random.random() * (max_sec - min_sec))
-
-
-def publish_via_playwright(title: str, content: str, work_dir: str = ".", **kwargs) -> dict:
-    """
-    便捷函数：使用 Playwright 发布文章
-    """
-    publisher = ToutiaoPublisher(work_dir=work_dir)
-    return publisher.publish_article(title=title, content=content, **kwargs)
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-    import sys
-
-    if len(sys.argv) < 3:
-        print("用法: python publisher.py <title> <content_file>")
-        sys.exit(1)
-
-    title = sys.argv[1]
-    content_file = sys.argv[2]
-
-    with open(content_file, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    publisher = ToutiaoPublisher(work_dir=".")
-    result = publisher.publish_article(title=title, content=content)
-    print(result)
+        return result
