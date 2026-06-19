@@ -153,38 +153,47 @@ class AIWriter:
         return result
 
     def _generate_image_keywords(self, hot_title: str, category: str) -> list:
-        """让AI生成3个配图关键词"""
-        prompt = f"""请根据以下热搜话题，生成3个适合做文章配图的关键词或英文搜索词。
+        """让AI生成3个配图关键词（中文，适配头条免费图库）"""
+        prompt = f"""请根据以下热搜话题，生成3个适合做文章配图的中文关键词。
 要求：
-1. 每个关键词2-4个英文单词
-2. 适合在免费图库（如Unsplash）搜索
+1. 每个关键词2-6个汉字
+2. 适合在头条免费图库搜索
 3. 与话题相关，不要太泛
 4. 每行一个，不要序号
+5. 只返回3行关键词，不要其他内容
 
 热搜话题：{hot_title}
 领域：{category}
 
-只返回3行关键词，不要其他内容："""
+示例（比亚迪唐L停产）：
+比亚迪
+唐L
+电动汽车
+
+只返回3行关键词："""
 
         try:
             messages = [
-                {"role": "system", "content": "你是一个图片关键词生成助手，擅长将中文话题转化为英文图片搜索关键词。"},
+                {"role": "system", "content": "你是一个图片关键词生成助手，擅长将话题转化为简洁的中文图片搜索关键词。"},
                 {"role": "user", "content": prompt},
             ]
             keywords_text = self._call_api(messages, max_tokens=100, temperature=0.7)
             keywords = [kw.strip() for kw in keywords_text.strip().split("\n") if kw.strip()][:3]
+            # 过滤掉可能的前缀
+            keywords = [kw.lstrip("1234567890.、）) ").strip() for kw in keywords]
+            keywords = [kw for kw in keywords if kw]  # 去掉空字符串
             logger.info(f"配图关键词: {keywords}")
             return keywords
         except Exception as e:
             logger.warning(f"生成配图关键词失败: {e}")
-            # 返回默认关键词
+            # 返回默认中文关键词
             defaults = {
-                "跨境电商": ["ecommerce", "online shopping", "global business"],
-                "外贸": ["international trade", "export", "business"],
-                "AI": ["artificial intelligence", "technology", "robot"],
-                "科技": ["technology", "innovation", "science"],
+                "跨境电商": ["电商", "外贸", "全球贸易"],
+                "外贸": ["外贸", "出口", "贸易"],
+                "AI": ["人工智能", "科技", "机器人"],
+                "科技": ["科技", "创新", "技术"],
             }
-            return defaults.get(category, ["technology", "news", "business"])[:3]
+            return defaults.get(category, ["科技", "新闻", "资讯"])[:3]
 
     def _format_to_html(self, title: str, content: str, category: str) -> str:
         """
