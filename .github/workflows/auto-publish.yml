@@ -58,6 +58,13 @@ jobs:
       - name: 安装 Node 依赖
         run: npm install
 
+      # ====== 5.1 添加 toutiao-ops 执行权限（修复 Linux 权限问题）======
+      - name: 添加 toutiao-ops 执行权限
+        run: |
+          chmod +x node_modules/@openclaw-cn/toutiao-ops/index.js 2>/dev/null || true
+          chmod +x node_modules/.bin/toutiao-ops 2>/dev/null || true
+          echo "权限修复完成"
+
       # ====== 5.1 恢复修补后的 toutiao-ops ======
       - name: 恢复修补后的 toutiao-ops
         run: node scripts/restore-toutiao-ops.js

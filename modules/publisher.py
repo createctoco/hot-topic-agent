@@ -16,7 +16,21 @@ NODE_PATH = os.environ.get("NODE_PATH", "node")
 NPX_PATH = os.environ.get("NPX_PATH", "npx")
 
 # toutiao-ops 命令前缀
-TOUTIAO_CMD = "npx @openclaw-cn/toutiao-ops"
+# 优先使用本地 node_modules/.bin/toutiao-ops（避免 npx 权限问题）
+# 如果本地不存在，fallback 到 npx
+def _get_toutiao_cmd(work_dir: str = ".") -> list:
+    local_bin = os.path.join(work_dir, "node_modules", ".bin", "toutiao-ops")
+    if os.path.exists(local_bin):
+        return [local_bin]
+    # 检查全局是否可用
+    import shutil
+    if shutil.which("toutiao-ops"):
+        return ["toutiao-ops"]
+    # Fallback 到 npx
+    return [NPX_PATH, "@openclaw-cn/toutiao-ops"]
+
+# 在 ToutiaoPublisher.__init__ 中设置 self.toutiao_cmd
+# （见下方 __init__ 修改）
 
 
 class ToutiaoPublisher:
@@ -26,6 +40,8 @@ class ToutiaoPublisher:
         work_dir: 工作目录（toutiao-ops 的安装目录）
         """
         self.work_dir = work_dir
+        self.toutiao_cmd = _get_toutiao_cmd(work_dir)
+        logger.info(f"toutiao-ops 命令: {' '.join(self.toutiao_cmd)}")
         self._check_environment()
 
     def _check_environment(self):
@@ -44,7 +60,7 @@ class ToutiaoPublisher:
 
     def _run_cmd(self, args: list, timeout: int = 120) -> Dict:
         """运行 toutiao-ops 命令"""
-        cmd = [NPX_PATH] + ["@openclaw-cn/toutiao-ops"] + args
+        cmd = self.toutiao_cmd + args
         logger.info(f"执行命令: {' '.join(cmd)}")
 
         try:
