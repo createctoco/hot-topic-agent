@@ -17,7 +17,7 @@ on:
         required: false
         default: "1"
       dry_run:
-        description: "仅生成不发布（保存为产物）"
+        description: "仅生成不发布（true=只写文章不发头条）"
         required: false
         default: "false"
 
@@ -41,37 +41,39 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       # ====== 3. 安装 Node.js ======
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
+          cache: "npm"
 
-      # ====== 4. 安装 Playwright 浏览器 ======
-      - name: 安装 Playwright
-        run: |
-          npm install
-          npx playwright install --with-deps chromium
-
-      # ====== 5. 安装 Python 依赖 ======
+      # ====== 4. 安装 Python 依赖 ======
       - name: 安装 Python 依赖
+        run: pip install -r requirements.txt
+
+      # ====== 5. 安装 Node 依赖 ======
+      - name: 安装 Node 依赖
+        run: npm install
+
+      # ====== 6. 安装 Playwright 浏览器 ======
+      - name: 安装 Playwright 浏览器
+        run: npx playwright install --with-deps chromium
+
+      # ====== 7. 注入头条 Cookie ======
+      - name: 注入头条登录 Cookie
         run: |
-          pip install -r requirements.txt
+          mkdir -p data/auth data/.toutiao-session
+          if [ -n "${{ secrets.TOUTIAO_COOKIES }}" ]; then
+            echo '${{ secrets.TOUTIAO_COOKIES }}' > data/auth/cookies.json
+            echo "Cookie 已注入"
+          else
+            echo "WARNING: TOUTIAO_COOKIES 未配置，头条发布可能失败"
+          fi
 
-      # ====== 6. 恢复登录会话（从 Cache） ======
-      - name: 恢复登录会话
-        id: restore-session
-        uses: actions/cache@v4
-        with:
-          path: |
-            data/.toutiao-session
-            data/auth
-          key: toutiao-session-${{ github.run_id }}
-          restore-keys: |
-            toutiao-session-
-
-      # ====== 7. 恢复发布历史 ======
+      # ====== 8. 恢复发布历史（防重复）======
       - name: 恢复发布历史
         uses: actions/cache@v4
         with:
@@ -80,32 +82,25 @@ jobs:
           restore-keys: |
             published-history-
 
-      # ====== 8. 配置环境变量 ======
-      - name: 配置环境变量
-        run: |
-          echo "DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}" >> $GITHUB_ENV
-          echo "NON_INTERACTIVE=1" >> $GITHUB_ENV
-          echo "TZ=Asia/Shanghai" >> $GITHUB_ENV
-        env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-
       # ====== 9. 执行发文 ======
       - name: 执行发文
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          NON_INTERACTIVE: "1"
+          TZ: "Asia/Shanghai"
         run: |
-          echo "=== 开始执行 ==="
+          echo "=== 开始执行 $(date) ==="
           COUNT="${{ github.event.inputs.count || '1' }}"
           DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
 
           if [ "$DRY_RUN" = "true" ]; then
-            echo "Dry run 模式：仅生成文章，不发布"
-            python3 main.py --test-filter || true
+            echo "Dry run 模式：仅生成文章，不发布到头条"
+            python3 main.py --test-filter
           else
-            python3 main.py --once --count $COUNT || true
+            python3 main.py --once --count $COUNT
           fi
 
-      # ====== 10. 上传生成的文章（作为产物） ======
+      # ====== 10. 上传文章产物（供查看）======
       - name: 上传文章产物
         if: always()
         uses: actions/upload-artifact@v4
@@ -114,19 +109,10 @@ jobs:
           path: |
             data/articles/
             data/logs/
+          if-no-files-found: ignore
           retention-days: 7
 
-      # ====== 11. 保存登录会话 ======
-      - name: 保存登录会话
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            data/.toutiao-session
-            data/auth
-          key: toutiao-session-${{ github.run_id }}
-
-      # ====== 12. 保存发布历史 ======
+      # ====== 11. 保存发布历史 ======
       - name: 保存发布历史
         if: always()
         uses: actions/cache/save@v4
