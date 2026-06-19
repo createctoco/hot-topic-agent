@@ -1,12 +1,11 @@
 # ============================================
 # 热搜自动发文 - GitHub Actions 工作流
-# 每天 8:00-22:00（北京时间）每2小时自动发文1篇
+# 使用纯 Python + Playwright 发布，无 npx 权限问题
 # ============================================
 name: 热搜自动发文
 
 on:
   # 定时触发（UTC时间，北京时间 = UTC+8）
-  # 0:00 UTC = 8:00 北京, 14:00 UTC = 22:00 北京
   schedule:
     - cron: "0 0,2,4,6,8,10,12,14 * * *"  # 每2小时，共8次
   # 手动触发
@@ -43,39 +42,25 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      # ====== 3. 安装 Node.js ======
+      # ====== 3. 安装 Node.js（仅用于 Cookie 注入脚本）======
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
 
       # ====== 4. 安装 Python 依赖 ======
       - name: 安装 Python 依赖
         run: pip install -r requirements.txt
 
-      # ====== 5. 安装 Node 依赖 ======
+      # ====== 5. 安装 Playwright 浏览器（Python 版）======
+      - name: 安装 Playwright 浏览器
+        run: |
+          playwright install chromium
+          playwright install-deps chromium
+
+      # ====== 6. 安装 Node 依赖（仅用于 Cookie 注入）======
       - name: 安装 Node 依赖
         run: npm install
-
-      # ====== 5.1 添加 toutiao-ops 执行权限（修复 Linux 权限问题）======
-      - name: 添加 toutiao-ops 执行权限
-        run: |
-          chmod +x node_modules/@openclaw-cn/toutiao-ops/index.js 2>/dev/null || true
-          chmod +x node_modules/.bin/toutiao-ops 2>/dev/null || true
-          echo "权限修复完成"
-
-      # ====== 5.1 恢复修补后的 toutiao-ops ======
-      - name: 恢复修补后的 toutiao-ops
-        run: node scripts/restore-toutiao-ops.js
-
-      # ====== 6. 安装 Playwright (供 Cookie 注入脚本使用) ======
-      - name: 安装 Playwright
-        run: npm install playwright
-
-      # ====== 7. 安装 Playwright 浏览器 ======
-      - name: 安装 Playwright 浏览器
-        run: npx playwright install --with-deps chromium
 
       # ====== 7. 生成配置文件 ======
       - name: 生成 config.yaml
@@ -83,7 +68,7 @@ jobs:
           cat > config.yaml << 'EOF'
           daily_count: 10
           deepseek:
-            api_key: "${{ secrets.DEEPSEEK_API_KEY }}"
+            api_key: "${DEEPSEEK_API_KEY}"
             base_url: "https://api.deepseek.com"
             model: "deepseek-chat"
           publish:
@@ -136,6 +121,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           NON_INTERACTIVE: "1"
           TZ: "Asia/Shanghai"
+          TOUTIAO_DATA_DIR: /home/runner/.toutiao-ops/accounts/default/browser-data
         run: |
           echo "=== 开始执行 $(date) ==="
           COUNT="${{ github.event.inputs.count }}"
