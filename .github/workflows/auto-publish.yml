@@ -62,7 +62,38 @@ jobs:
       - name: 安装 Playwright 浏览器
         run: npx playwright install --with-deps chromium
 
-      # ====== 7. 注入头条 Cookie ======
+      # ====== 7. 生成配置文件 ======
+      - name: 生成 config.yaml
+        run: |
+          cat > config.yaml << 'EOF'
+          daily_count: 10
+          deepseek:
+            api_key: "${{ secrets.DEEPSEEK_API_KEY }}"
+            base_url: "https://api.deepseek.com"
+            model: "deepseek-chat"
+          publish:
+            first_publish: true
+            ai_declared: true
+            interval_seconds: 90
+          hot_search:
+            platforms:
+              - baidu
+              - weibo
+              - zhihu
+              - toutiao
+            request_interval: 0.5
+          categories:
+            - 跨境电商
+            - 外贸
+            - AI
+            - 科技
+          logging:
+            level: INFO
+            save_days: 30
+          EOF
+          echo "config.yaml 已生成"
+
+      # ====== 8. 注入头条 Cookie ======
       - name: 注入头条登录 Cookie
         run: |
           mkdir -p data/auth
@@ -75,7 +106,7 @@ jobs:
             echo "WARNING: TOUTIAO_COOKIES 未配置，头条发布可能失败"
           fi
 
-      # ====== 8. 恢复发布历史（防重复）======
+      # ====== 9. 恢复发布历史（防重复）======
       - name: 恢复发布历史
         uses: actions/cache@v4
         with:
@@ -84,7 +115,7 @@ jobs:
           restore-keys: |
             published-history-
 
-      # ====== 9. 执行发文 ======
+      # ====== 10. 执行发文 ======
       - name: 执行发文
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -102,7 +133,7 @@ jobs:
             python3 main.py --once --count $COUNT
           fi
 
-      # ====== 10. 上传文章产物（供查看）======
+      # ====== 11. 上传文章产物（供查看）======
       - name: 上传文章产物
         if: always()
         uses: actions/upload-artifact@v4
@@ -114,7 +145,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # ====== 11. 保存发布历史 ======
+      # ====== 12. 保存发布历史 ======
       - name: 保存发布历史
         if: always()
         uses: actions/cache/save@v4

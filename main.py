@@ -236,14 +236,7 @@ def main():
     parser.add_argument("--once", action="store_true", help="执行一次后退出（不启动定时）")
     args = parser.parse_args()
 
-    config = load_config()
-
-    if args.login:
-        # 登录头条
-        publisher = ToutiaoPublisher(work_dir=str(PROJECT_ROOT))
-        publisher.login()
-        return
-
+    # 测试命令不需要 config.yaml
     if args.test_search:
         # 测试热搜采集
         items = fetch_all()
@@ -262,10 +255,20 @@ def main():
             for item in cat_items:
                 print(f"  - {item['title']} ({item['platform']})")
 
-        selected = select_topics(filtered, config.get("daily_count", 10))
+        # 选取选题（默认10个，不需要 config）
+        selected = select_topics(filtered, 10)
         print(f"\n选中 {len(selected)} 个选题:")
         for s in selected:
             print(f"  [{s['category']}] {s['title']}")
+        return
+
+    # 以下命令需要 config
+    config = load_config()
+
+    if args.login:
+        # 登录头条
+        publisher = ToutiaoPublisher(work_dir=str(PROJECT_ROOT))
+        publisher.login()
         return
 
     if args.once:
