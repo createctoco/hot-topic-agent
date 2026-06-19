@@ -137,12 +137,12 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
     # 初始化发布器（非 dry_run 才需要）
     publisher = ToutiaoPublisher(work_dir=str(PROJECT_ROOT)) if not dry_run else None
 
-    # 检查登录状态（仅真实发布模式）
-    if not dry_run and publisher and not publisher.check_login():
-        logger.warning("头条未登录！请先运行: python main.py --login")
-        logger.warning("登录后重新运行程序")
-        stats["end_time"] = datetime.now().isoformat()
-        return stats
+    # 检查登录状态（仅真实发布模式，不阻塞执行）
+    if not dry_run and publisher:
+        if not publisher.check_login():
+            logger.warning("⚠️ 头条登录状态检查失败，仍尝试发布（若失败请更新 TOUTIAO_COOKIES Secret）")
+        else:
+            logger.info("✅ 头条登录状态正常")
 
     # 加载历史记录（避免重复发布）
     history = load_published_history()
