@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import logging
+import struct
+import zlib
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -13,8 +15,53 @@ logger = logging.getLogger(__name__)
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
 
-# 头条发布页 URL（用于检查登录状态）
-LOGIN_CHECK_URL = "https://mp.toutiao.com/profile_v4/home"
+# 默认占位图路径（首次运行时生成）
+PLACEHOLDER_COVER = PROJECT_ROOT / "data" / "assets" / "placeholder_cover.png"
+
+
+def _create_placeholder_cover() -> Path:
+    """创建一个1x1像素的红色PNG作为占位封面（不需要Pillow）"""
+    PLACEHOLDER_COVER.parent.mkdir(parents=True, exist_ok=True)
+    
+    if PLACEHOLDER_COVER.exists():
+        return PLACEHOLDER_COVER
+    
+    # 创建一个简单的1x1像素PNG（红色）
+    width, height = 100, 100
+    
+    def make_png():
+        # PNG 文件结构
+        signature = b'\x89PNG\r\n\x1a\n'
+        
+        # IHDR chunk
+        ihdr_data = struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0)
+        ihdr_crc = zlib.crc32(b'IHDR' + ihdr_data) & 0xffffffff
+        ihdr_chunk = struct.pack('>I', 13) + b'IHDR' + ihdr_data + struct.pack('>I', ihdr_crc)
+        
+        # IDAT chunk (图像数据)
+        raw_data = b''
+        for y in range(height):
+            raw_data += b'\x00'  # 过滤器字节
+            for x in range(width):
+                # 红色像素 (R=255, G=100, B=100)
+                raw_data += bytes([255, 100, 100])
+        
+        compressed = zlib.compress(raw_data)
+        idat_crc = zlib.crc32(b'IDAT' + compressed) & 0xffffffff
+        idat_chunk = struct.pack('>I', len(compressed)) + b'IDAT' + compressed + struct.pack('>I', idat_crc)
+        
+        # IEND chunk
+        iend_crc = zlib.crc32(b'IEND') & 0xffffffff
+        iend_chunk = struct.pack('>I', 0) + b'IEND' + struct.pack('>I', iend_crc)
+        
+        return signature + ihdr_chunk + idat_chunk + iend_chunk
+    
+    png_data = make_png()
+    with open(PLACEHOLDER_COVER, 'wb') as f:
+        f.write(png_data)
+    
+    logger.info(f"已生成占位封面图: {PLACEHOLDER_COVER}")
+    return PLACEHOLDER_COVER
 
 
 class ToutiaoPublisher:
@@ -25,6 +72,8 @@ class ToutiaoPublisher:
         """
         self.work_dir = Path(work_dir).resolve()
         self._check_environment()
+        # 确保占位封面存在
+        _create_placeholder_cover()
 
     def _check_environment(self):
         """检查运行环境"""
@@ -55,7 +104,6 @@ class ToutiaoPublisher:
         """
         运行 toutiao-ops 命令（用 node 直接运行 index.js，绕过 npx 权限问题）
         """
-        # 直接运行 index.js，不用 npx
         index_js = self.work_dir / "node_modules" / "@openclaw-cn" / "toutiao-ops" / "index.js"
         
         if not index_js.exists():
@@ -107,7 +155,7 @@ class ToutiaoPublisher:
             category: 领域分类
             first_publish: 是否声明头条首发
             ai_declared: 是否声明AI生成
-            cover_keyword: 免费图库搜索关键词
+            cover_keyword: 免费图库搜索关键词（暂未使用，原版不支持）
 
         返回: {"success": bool, "message": str}
         """
@@ -118,10 +166,16 @@ class ToutiaoPublisher:
             f.write(content)
         logger.info(f"正文已保存到: {content_file}")
 
-        # 2. 构建命令参数
+        # 2. 确保封面图存在（toutiao-ops 必须要有 --cover 参数）
+        cover_path = str(PLACEHOLDER_COVER)
+        if not os.path.exists(cover_path):
+            cover_path = str(_create_placeholder_cover())
+
+        # 3. 构建命令参数
         args = ["publish", "article"]
         args += ["--title", title]
         args += ["--content-file", content_file]
+        args += ["--cover", cover_path]  # 必须要有封面图
 
         if first_publish:
             args.append("--first-publish")
@@ -129,15 +183,14 @@ class ToutiaoPublisher:
         if ai_declared:
             args.append("--ai-declared")
 
-        # 免费图库配图
-        if cover_keyword:
-            args += ["--cover-free", "--cover-keyword", cover_keyword]
+        # 注意：原版 toutiao-ops 不支持 --cover-free 和 --cover-keyword
+        # 如果需要使用免费图库，需要在发布后手动在头条后台更换封面
 
-        # 3. 执行发布命令
+        # 4. 执行发布命令
         logger.info(f"发布文章: [{category}] {title}")
         result = self._run_toutiao_cmd(args, timeout=180)
 
-        # 4. 清理临时文件
+        # 5. 清理临时文件
         try:
             os.unlink(content_file)
         except:
