@@ -175,12 +175,14 @@ def run_once(config: dict, articles_count: int = None) -> dict:
 
             # 发布到头条
             publish_config = config.get("publish", {})
+            cover_keyword = article.get("image_keywords", [""])[0] if article.get("image_keywords") else ""
             result = publisher.publish_article(
                 title=article["title"],
                 content=article["content"],
                 category=article["category"],
                 first_publish=publish_config.get("first_publish", True),
                 ai_generated=publish_config.get("ai_declared", True),
+                cover_keyword=cover_keyword,
             )
 
             if result["success"]:
@@ -234,6 +236,7 @@ def main():
     parser.add_argument("--test-filter", action="store_true", help="测试关键词过滤")
     parser.add_argument("--count", type=int, default=None, help="本次发布文章数量")
     parser.add_argument("--once", action="store_true", help="执行一次后退出（不启动定时）")
+    parser.add_argument("--dry-run", action="store_true", help="生成文章但不发布到头条（测试用）")
     args = parser.parse_args()
 
     # 测试命令不需要 config.yaml

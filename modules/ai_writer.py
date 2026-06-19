@@ -146,10 +146,45 @@ class AIWriter:
             "raw_content": content,
             "category": category,
             "source_topic": hot_title,
+            "image_keywords": self._generate_image_keywords(hot_title, category),
         }
 
         logger.info(f"文章生成完成: {title} ({len(content)}字)")
         return result
+
+    def _generate_image_keywords(self, hot_title: str, category: str) -> list:
+        """让AI生成3个配图关键词"""
+        prompt = f"""请根据以下热搜话题，生成3个适合做文章配图的关键词或英文搜索词。
+要求：
+1. 每个关键词2-4个英文单词
+2. 适合在免费图库（如Unsplash）搜索
+3. 与话题相关，不要太泛
+4. 每行一个，不要序号
+
+热搜话题：{hot_title}
+领域：{category}
+
+只返回3行关键词，不要其他内容："""
+
+        try:
+            messages = [
+                {"role": "system", "content": "你是一个图片关键词生成助手，擅长将中文话题转化为英文图片搜索关键词。"},
+                {"role": "user", "content": prompt},
+            ]
+            keywords_text = self._call_api(messages, max_tokens=100, temperature=0.7)
+            keywords = [kw.strip() for kw in keywords_text.strip().split("\n") if kw.strip()][:3]
+            logger.info(f"配图关键词: {keywords}")
+            return keywords
+        except Exception as e:
+            logger.warning(f"生成配图关键词失败: {e}")
+            # 返回默认关键词
+            defaults = {
+                "跨境电商": ["ecommerce", "online shopping", "global business"],
+                "外贸": ["international trade", "export", "business"],
+                "AI": ["artificial intelligence", "technology", "robot"],
+                "科技": ["technology", "innovation", "science"],
+            }
+            return defaults.get(category, ["technology", "news", "business"])[:3]
 
     def _format_to_html(self, title: str, content: str, category: str) -> str:
         """

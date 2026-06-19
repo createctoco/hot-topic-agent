@@ -97,6 +97,7 @@ class ToutiaoPublisher:
         first_publish: bool = True,
         ai_generated: bool = True,
         cover_images: list = None,
+        cover_keyword: str = "",
     ) -> Dict:
         """
         发布文章到今日头条
@@ -124,7 +125,11 @@ class ToutiaoPublisher:
         if ai_generated:
             args.append("--ai-declared")
 
-        if cover_images:
+        # 免费图库模式（优先）或本地封面
+        if cover_keyword:
+            args.append("--cover-free")
+            args.extend(["--cover-keyword", cover_keyword])
+        elif cover_images:
             for i, img in enumerate(cover_images[:3]):
                 args.extend([f"--cover-{i+1}", img])
 
@@ -137,17 +142,10 @@ class ToutiaoPublisher:
         with open(content_file, "w", encoding="utf-8") as f:
             f.write(content)
 
-        # 用文件方式传递内容
-        args = [
-            "publish", "article",
-            "--title", title,
-            "--content-file", os.path.abspath(content_file),
-        ]
-
-        if first_publish:
-            args.append("--first-publish")
-        if ai_generated:
-            args.append("--ai-declared")
+        # 用文件方式替换 --content
+        content_idx = args.index("--content")
+        args[content_idx] = "--content-file"
+        args[content_idx + 1] = os.path.abspath(content_file)
 
         result = self._run_cmd(args, timeout=180)
 
