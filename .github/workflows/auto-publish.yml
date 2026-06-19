@@ -58,7 +58,11 @@ jobs:
       - name: 安装 Node 依赖
         run: npm install
 
-      # ====== 6. 安装 Playwright 浏览器 ======
+      # ====== 6. 安装 Playwright (供 Cookie 注入脚本使用) ======
+      - name: 安装 Playwright
+        run: npm install playwright
+
+      # ====== 7. 安装 Playwright 浏览器 ======
       - name: 安装 Playwright 浏览器
         run: npx playwright install --with-deps chromium
 
