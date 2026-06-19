@@ -69,7 +69,7 @@ def save_published_history(history: list):
         json.dump(history, f, ensure_ascii=False, indent=2)
 
 
-def run_once(config: dict, articles_count: int = None) -> dict:
+def run_once(config: dict, articles_count: int = None, dry_run: bool = False) -> dict:
     """
     执行一次完整的流程：采集 → 过滤 → 生成 → 发布
     返回执行结果统计
@@ -134,11 +134,11 @@ def run_once(config: dict, articles_count: int = None) -> dict:
         base_url=deepseek_config.get("base_url", "https://api.deepseek.com"),
     )
 
-    # 初始化发布器（非 dry_run 才检查登录）
+    # 初始化发布器（非 dry_run 才需要）
     publisher = ToutiaoPublisher(work_dir=str(PROJECT_ROOT)) if not dry_run else None
 
     # 检查登录状态（仅真实发布模式）
-    if not dry_run and not publisher.check_login():
+    if not dry_run and publisher and not publisher.check_login():
         logger.warning("头条未登录！请先运行: python main.py --login")
         logger.warning("登录后重新运行程序")
         stats["end_time"] = datetime.now().isoformat()
@@ -173,43 +173,57 @@ def run_once(config: dict, articles_count: int = None) -> dict:
             with open(article_file, "w", encoding="utf-8") as f:
                 json.dump(article, f, ensure_ascii=False, indent=2)
 
-            # 发布到头条
-            publish_config = config.get("publish", {})
-            cover_keyword = article.get("image_keywords", [""])[0] if article.get("image_keywords") else ""
-            result = publisher.publish_article(
-                title=article["title"],
-                content=article["content"],
-                category=article["category"],
-                first_publish=publish_config.get("first_publish", True),
-                ai_generated=publish_config.get("ai_declared", True),
-                cover_keyword=cover_keyword,
-            )
+            # 发布到头条（仅非 dry_run 模式）
+            if not dry_run and publisher:
+                publish_config = config.get("publish", {})
+                cover_keyword = article.get("image_keywords", [""])[0] if article.get("image_keywords") else ""
+                result = publisher.publish_article(
+                    title=article["title"],
+                    content=article["content"],
+                    category=article["category"],
+                    first_publish=publish_config.get("first_publish", True),
+                    ai_generated=publish_config.get("ai_declared", True),
+                    cover_keyword=cover_keyword,
+                )
 
-            if result["success"]:
-                stats["published"] += 1
-                logger.info(f"  ✅ 发布成功: {article['title']}")
+                if result["success"]:
+                    stats["published"] += 1
+                    logger.info(f"  ✅ 发布成功: {article['title']}")
+                else:
+                    stats["failed"] += 1
+                    logger.error(f"  ❌ 发布失败: {result['message']}")
+
+                # 记录历史
+                history.append({
+                    "title": article["title"],
+                    "source_topic": topic["title"],
+                    "category": topic["category"],
+                    "published_at": datetime.now().isoformat(),
+                    "success": result["success"],
+                    "article_file": str(article_file),
+                })
+                save_published_history(history)
+                published_titles.add(topic["title"])
             else:
-                stats["failed"] += 1
-                logger.error(f"  ❌ 发布失败: {result['message']}")
-
-            # 记录历史
-            history.append({
-                "title": article["title"],
-                "source_topic": topic["title"],
-                "category": topic["category"],
-                "published_at": datetime.now().isoformat(),
-                "success": result["success"],
-                "article_file": str(article_file),
-            })
-            save_published_history(history)
-            published_titles.add(topic["title"])
+                # dry_run 模式：只保存文章，不发布
+                logger.info(f"  (dry_run 模式，跳过发布，文章已保存: {article_file.name})")
+                history.append({
+                    "title": article["title"],
+                    "source_topic": topic["title"],
+                    "category": article["category"],
+                    "published_at": datetime.now().isoformat(),
+                    "success": True,
+                    "article_file": str(article_file),
+                    "dry_run": True,
+                })
+                save_published_history(history)
 
             stats["generated"] += 1
             stats["articles"].append({
                 "title": article["title"],
                 "category": article["category"],
                 "source": topic["title"],
-                "success": result["success"],
+                "success": True,
             })
 
             # 间隔等待，避免发布太快
@@ -274,9 +288,9 @@ def main():
         publisher.login()
         return
 
-    if args.once:
-        # 执行一次
-        stats = run_once(config, args.count)
+    if args.once or args.dry_run:
+        # 执行一次（含 dry_run 模式）
+        stats = run_once(config, args.count, args.dry_run)
         print(f"\n{'='*50}")
         print(f"执行完成！")
         print(f"  采集热搜: {stats['collected']} 条")
