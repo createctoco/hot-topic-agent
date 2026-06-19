@@ -65,10 +65,12 @@ jobs:
       # ====== 7. 注入头条 Cookie ======
       - name: 注入头条登录 Cookie
         run: |
-          mkdir -p data/auth data/.toutiao-session
+          mkdir -p data/auth
           if [ -n "${{ secrets.TOUTIAO_COOKIES }}" ]; then
             echo '${{ secrets.TOUTIAO_COOKIES }}' > data/auth/cookies.json
-            echo "Cookie 已注入"
+            echo "Cookie 文件已写入，开始注入到浏览器会话..."
+            node scripts/inject-cookies.mjs
+            echo "✅ Cookie 注入成功"
           else
             echo "WARNING: TOUTIAO_COOKIES 未配置，头条发布可能失败"
           fi
