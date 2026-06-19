@@ -134,11 +134,11 @@ def run_once(config: dict, articles_count: int = None) -> dict:
         base_url=deepseek_config.get("base_url", "https://api.deepseek.com"),
     )
 
-    # 初始化发布器
-    publisher = ToutiaoPublisher(work_dir=str(PROJECT_ROOT))
+    # 初始化发布器（非 dry_run 才检查登录）
+    publisher = ToutiaoPublisher(work_dir=str(PROJECT_ROOT)) if not dry_run else None
 
-    # 检查登录状态
-    if not publisher.check_login():
+    # 检查登录状态（仅真实发布模式）
+    if not dry_run and not publisher.check_login():
         logger.warning("头条未登录！请先运行: python main.py --login")
         logger.warning("登录后重新运行程序")
         stats["end_time"] = datetime.now().isoformat()
