@@ -120,17 +120,18 @@ class ToutiaoPublisher:
         args += ["--title", title]
         args += ["--content-file", content_file]
 
-        # 3. 使用头条免费图库（封面必须有关键词，否则用标题前4字兜底）
+        # 3. 使用头条免费图库（--cover-free 使 --cover 变为可选）
         fallback_keyword = title[:4] if title else "科技"
         keyword = cover_keyword if cover_keyword else fallback_keyword
-        args += ["--cover-mode", "free", "--cover-keyword", keyword]
+        args += ["--cover-free", "--cover-keyword", keyword]
         logger.info(f"使用免费图库，封面关键词: {keyword}")
 
         if first_publish:
             args.append("--first-publish")
 
+        # AI声明：toutiao-ops 用 --declaration 参数，不是 --ai-declared
         if ai_declared:
-            args.append("--ai-declared")
+            args += ["--declaration", "引用AI"]
 
         # 4. 执行发布命令
         logger.info(f"发布文章: [{category}] {title}")
