@@ -7,12 +7,27 @@ import json
 import os
 import subprocess
 import logging
+import base64
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
+
+# 1x1 像素 JPEG 的 base64 数据（用于满足 --cover 必填参数）
+# 实际封面由 --cover-free 从头条免费图库选取，此图片不会被使用
+PLACEHOLDER_JPEG_B64 = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAr/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AL+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/9k="
+
+
+def _ensure_placeholder_image() -> str:
+    """生成占位图片文件，返回路径"""
+    img_path = PROJECT_ROOT / "data" / "placeholder.jpg"
+    img_path.parent.mkdir(parents=True, exist_ok=True)
+    if not img_path.exists():
+        img_data = base64.b64decode(PLACEHOLDER_JPEG_B64)
+        img_path.write_bytes(img_data)
+    return str(img_path)
 
 
 class ToutiaoPublisher:
@@ -54,7 +69,7 @@ class ToutiaoPublisher:
         运行 toutiao-ops 命令（用 node 直接运行 index.js，绕过 npx 权限问题）
         """
         index_js = self.work_dir / "node_modules" / "@openclaw-cn" / "toutiao-ops" / "index.js"
-        
+
         if not index_js.exists():
             return {"success": False, "message": f"toutiao-ops 未找到: {index_js}"}
 
@@ -83,7 +98,7 @@ class ToutiaoPublisher:
 
     def check_login(self) -> bool:
         """检查登录状态"""
-        result = self._run_toutiao_cmd(["auth", "status"])
+        result = self._run_toutiao_cmd(["auth", "check"])
         return result["success"] and "已登录" in result.get("message", "")
 
     def publish_article(
@@ -115,23 +130,31 @@ class ToutiaoPublisher:
             f.write(content)
         logger.info(f"正文已保存到: {content_file}")
 
-        # 2. 构建命令参数
+        # 2. 生成占位图片（满足 --cover 必填，实际由 --cover-free 从免费图库选图）
+        placeholder_path = _ensure_placeholder_image()
+
+        # 3. 构建命令参数
         args = ["publish", "article"]
         args += ["--title", title]
         args += ["--content-file", content_file]
-
-        # 3. 使用头条免费图库（--cover-free 使 --cover 变为可选）
+        args += ["--cover", placeholder_path]        # 占位图片，满足必填
+        args += ["--cover-free"]                     # 使用免费图库选图
         fallback_keyword = title[:4] if title else "科技"
         keyword = cover_keyword if cover_keyword else fallback_keyword
-        args += ["--cover-free", "--cover-keyword", keyword]
+        args += ["--cover-keyword", keyword]
         logger.info(f"使用免费图库，封面关键词: {keyword}")
 
         if first_publish:
             args.append("--first-publish")
 
-        # AI声明：toutiao-ops 用 --declaration 参数，不是 --ai-declared
+        # AI声明：toutiao-ops 用 --declaration 参数
         if ai_declared:
             args += ["--declaration", "引用AI"]
+
+        # CI/服务器环境需要无头模式
+        if os.environ.get("NON_INTERACTIVE") or os.environ.get("CI"):
+            args.append("--headless")
+            logger.info("使用无头模式运行")
 
         # 4. 执行发布命令
         logger.info(f"发布文章: [{category}] {title}")
