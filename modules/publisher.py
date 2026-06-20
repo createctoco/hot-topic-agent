@@ -138,7 +138,7 @@ class ToutiaoPublisher:
         args += ["--title", title]
         args += ["--content-file", content_file]
         args += ["--cover", placeholder_path]        # 占位图片，满足必填
-        args += ["--cover-free"]                     # 使用免费图库选图
+        args += ["--cover-mode", "free"]             # 使用免费图库选图（覆盖占位图）
         fallback_keyword = title[:4] if title else "科技"
         keyword = cover_keyword if cover_keyword else fallback_keyword
         args += ["--cover-keyword", keyword]
