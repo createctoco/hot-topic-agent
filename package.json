@@ -10,7 +10,7 @@
     "inject-cookies": "node scripts/inject-cookies.mjs"
   },
   "dependencies": {
-    "@openclaw-cn/toutiao-ops": "latest",
+    "@openclaw-cn/toutiao-ops": "1.1.4",
     "playwright": "latest"
   }
 }
