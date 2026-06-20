@@ -1,13 +1,12 @@
 # ============================================
 # 热搜自动发文 - GitHub Actions 工作流
-# 使用纯 Python + Playwright 发布，无 npx 权限问题
 # ============================================
 name: 热搜自动发文
 
 on:
   # 定时触发（UTC时间，北京时间 = UTC+8）
   schedule:
-    - cron: "0 0,2,4,6,8,10,12,14 * * *"  # 每2小时，共8次
+    - cron: "0 0,2,4,6,8,10,12,14 * * *"  # 每2小时，共8次（北京时间 8:00-22:00）
   # 手动触发
   workflow_dispatch:
     inputs:
@@ -42,7 +41,7 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      # ====== 3. 安装 Node.js（仅用于 Cookie 注入脚本）======
+      # ====== 3. 安装 Node.js ======
       - name: 安装 Node.js
         uses: actions/setup-node@v4
         with:
@@ -52,20 +51,20 @@ jobs:
       - name: 安装 Python 依赖
         run: pip install -r requirements.txt
 
-      # ====== 5. 安装 Playwright 浏览器（Python 版）======
-      - name: 安装 Playwright 浏览器
-        run: |
-          playwright install chromium
-          playwright install-deps chromium
-
-      # ====== 6. 安装 Node 依赖（仅用于 Cookie 注入）======
+      # ====== 5. 安装 Node 依赖（toutiao-ops + playwright node版）======
       - name: 安装 Node 依赖
         run: npm install
 
-      # ====== 7. 生成配置文件 ======
+      # ====== 6. 安装 Node.js Playwright 浏览器（用于 Cookie 注入 + toutiao-ops）======
+      - name: 安装 Node Playwright 浏览器
+        run: npx playwright install chromium --with-deps
+
+      # ====== 7. 生成配置文件（注意用双引号 EOF，使环境变量生效）======
       - name: 生成 config.yaml
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          cat > config.yaml << 'EOF'
+          cat > config.yaml << EOF
           daily_count: 10
           deepseek:
             api_key: "${DEEPSEEK_API_KEY}"
@@ -92,6 +91,8 @@ jobs:
             save_days: 30
           EOF
           echo "config.yaml 已生成"
+          # 验证 API Key 是否写入（只打印前几个字符）
+          python3 -c "import yaml; c=yaml.safe_load(open('config.yaml')); k=c['deepseek']['api_key']; print(f'API Key 前缀: {k[:8]}...' if k and k != 'None' else '❌ API Key 为空！')"
 
       # ====== 8. 注入头条 Cookie ======
       - name: 注入头条登录 Cookie
@@ -103,7 +104,7 @@ jobs:
             node scripts/inject-cookies.mjs
             echo "✅ Cookie 注入成功"
           else
-            echo "WARNING: TOUTIAO_COOKIES 未配置，头条发布可能失败"
+            echo "⚠️ WARNING: TOUTIAO_COOKIES 未配置，将跳过头条发布"
           fi
 
       # ====== 9. 恢复发布历史（防重复）======
@@ -121,15 +122,16 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           NON_INTERACTIVE: "1"
           TZ: "Asia/Shanghai"
-          TOUTIAO_DATA_DIR: /home/runner/.toutiao-ops/accounts/default/browser-data
         run: |
           echo "=== 开始执行 $(date) ==="
           COUNT="${{ github.event.inputs.count }}"
           DRY_RUN="${{ github.event.inputs.dry_run }}"
 
-          # 默认值
+          # 默认值（定时触发时 inputs 为空，默认正式发布）
           if [ -z "$COUNT" ]; then COUNT="10"; fi
-          if [ -z "$DRY_RUN" ]; then DRY_RUN="true"; fi
+          if [ -z "$DRY_RUN" ]; then DRY_RUN="false"; fi
+
+          echo "发布数量: $COUNT，Dry Run: $DRY_RUN"
 
           if [ "$DRY_RUN" = "true" ]; then
             echo "Dry run 模式：仅生成文章，不发布到头条"

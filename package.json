@@ -4,12 +4,13 @@
   "description": "热搜自动发文系统 - 采集热搜 -> AI写文章 -> 自动发头条",
   "scripts": {
     "start": "node publish_helper.js",
-    "setup": "npm install && npx playwright install chromium",
+    "setup": "npm install && npx playwright install chromium --with-deps",
     "login": "npx toutiao-ops auth login",
     "extract-cookies": "node scripts/extract-cookies.mjs",
     "inject-cookies": "node scripts/inject-cookies.mjs"
   },
   "dependencies": {
-    "@openclaw-cn/toutiao-ops": "latest"
+    "@openclaw-cn/toutiao-ops": "latest",
+    "playwright": "latest"
   }
 }

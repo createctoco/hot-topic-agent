@@ -36,15 +36,16 @@ CATEGORY_STYLES = {
 
 
 class AIWriter:
-    def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com"):
+    def __init__(self, api_key: str, base_url: str = "https://api.deepseek.com", model: str = "deepseek-chat"):
         """
         初始化 DeepSeek API 客户端
         api_key: DeepSeek API密钥
         base_url: API地址（默认 https://api.deepseek.com）
+        model: 模型名称（默认 deepseek-chat）
         """
         self.client = OpenAI(api_key=api_key, base_url=base_url)
-        self.model = "deepseek-chat"
-        logger.info("AI Writer 初始化完成 (DeepSeek)")
+        self.model = model
+        logger.info(f"AI Writer 初始化完成 (DeepSeek, model={model})")
 
     def _call_api(self, messages: list, max_tokens: int = 4096, temperature: float = 0.8) -> str:
         """调用 DeepSeek API"""

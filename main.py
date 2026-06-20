@@ -132,6 +132,7 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
     writer = AIWriter(
         api_key=api_key,
         base_url=deepseek_config.get("base_url", "https://api.deepseek.com"),
+        model=deepseek_config.get("model", "deepseek-chat"),
     )
 
     # 初始化发布器（非 dry_run 才需要）

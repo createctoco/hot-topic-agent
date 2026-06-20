@@ -120,13 +120,11 @@ class ToutiaoPublisher:
         args += ["--title", title]
         args += ["--content-file", content_file]
 
-        # 3. 使用头条免费图库（不需要本地图片）
-        if cover_keyword:
-            args += ["--cover-mode", "free", "--cover-keyword", cover_keyword]
-            logger.info(f"使用免费图库，关键词: {cover_keyword}")
-        else:
-            args += ["--cover-mode", "none"]
-            logger.info("未提供配图关键词，不使用封面")
+        # 3. 使用头条免费图库（封面必须有关键词，否则用标题前4字兜底）
+        fallback_keyword = title[:4] if title else "科技"
+        keyword = cover_keyword if cover_keyword else fallback_keyword
+        args += ["--cover-mode", "free", "--cover-keyword", keyword]
+        logger.info(f"使用免费图库，封面关键词: {keyword}")
 
         if first_publish:
             args.append("--first-publish")
