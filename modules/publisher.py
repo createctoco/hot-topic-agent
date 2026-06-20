@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).parent.parent
 
 # 1x1 像素 JPEG 的 base64 数据（用于满足 --cover 必填参数）
-# 实际封面由 --cover-free 从头条免费图库选取，此图片不会被使用
+# 实际封面由 --cover-mode free 从头条免费图库选取，此图片不会被使用
 PLACEHOLDER_JPEG_B64 = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAr/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AL+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/9k="
 
 
@@ -130,7 +130,7 @@ class ToutiaoPublisher:
             f.write(content)
         logger.info(f"正文已保存到: {content_file}")
 
-        # 2. 生成占位图片（满足 --cover 必填，实际由 --cover-free 从免费图库选图）
+        # 2. 生成占位图片（满足 --cover 必填，实际由 --cover-mode free 从免费图库选图）
         placeholder_path = _ensure_placeholder_image()
 
         # 3. 构建命令参数
