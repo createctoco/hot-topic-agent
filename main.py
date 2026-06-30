@@ -299,6 +299,9 @@ def main():
         print(f"  生成文章: {stats['generated']} 篇")
         print(f"  发布成功: {stats['published']} 篇")
         print(f"  发布失败: {stats['failed']} 篇")
+        if stats.get("failed", 0) > 0 or stats.get("error"):
+            logger.error("Run completed with failures; returning a non-zero exit code.")
+            raise SystemExit(1)
         return
 
     # 默认：启动定时调度
