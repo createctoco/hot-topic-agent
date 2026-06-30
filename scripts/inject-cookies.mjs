@@ -90,7 +90,7 @@ try {
   console.log(`   Cookie 数量: ${cookies.length}`);
   console.log(`   localStorage 项: ${Object.keys(localStorageData).length}`);
   console.log(`   浏览器会话已保存到: ${userDataDir}`);
-  console.log(`\n下一步：运行 npx @openclaw-cn/toutiao-ops auth status 验证登录状态`);
+  console.log(`\n下一步：运行 npx @openclaw-cn/toutiao-ops auth check --headless 验证登录状态`);
 } catch (err) {
   console.error('\n❌ 注入失败:', err.message);
   if (browser) await browser.close().catch(() => {});

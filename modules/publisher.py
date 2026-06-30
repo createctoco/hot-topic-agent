@@ -1,128 +1,172 @@
-"""
-今日头条自动发布模块
-使用 node 直接运行 toutiao-ops/index.js，彻底绕过 npx 权限问题
-自适应 toutiao-ops 不同版本的参数差异
-"""
+"""Reliable wrapper around the toutiao-ops CLI."""
+
+from __future__ import annotations
+
 import json
-import os
-import subprocess
 import logging
-import base64
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
+from typing import Any
+
 
 logger = logging.getLogger(__name__)
-
-# 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent
-
-# 1x1 像素 JPEG 的 base64 数据（用于满足 --cover 必填参数）
-PLACEHOLDER_JPEG_B64 = "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAr/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AL+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/9k="
-
-
-def _ensure_placeholder_image() -> str:
-    """生成占位图片文件，返回路径"""
-    img_path = PROJECT_ROOT / "data" / "placeholder.jpg"
-    img_path.parent.mkdir(parents=True, exist_ok=True)
-    if not img_path.exists():
-        img_data = base64.b64decode(PLACEHOLDER_JPEG_B64)
-        img_path.write_bytes(img_data)
-    return str(img_path)
 
 
 class ToutiaoPublisher:
-    def __init__(self, work_dir: str = "."):
-        """
-        初始化发布器
-        work_dir: 工作目录（toutiao-ops 的安装目录）
-        """
+    """Run toutiao-ops and accept only structured, confirmed results."""
+
+    def __init__(self, work_dir: str = ".", validate_environment: bool = True):
         self.work_dir = Path(work_dir).resolve()
-        self._supported_opts = None  # 缓存 --help 解析结果
-        self._check_environment()
+        self.node_binary = os.environ.get("TOUTIAO_NODE_BINARY") or shutil.which("node")
+        override = os.environ.get("TOUTIAO_OPS_INDEX")
+        self.index_js = (
+            Path(override).expanduser().resolve()
+            if override
+            else self.work_dir
+            / "node_modules"
+            / "@openclaw-cn"
+            / "toutiao-ops"
+            / "index.js"
+        )
+        self._supported_opts: set[str] | None = None
+        self._help_output = ""
+        if validate_environment:
+            self._check_environment()
 
-    def _check_environment(self):
-        """检查运行环境"""
-        # 检查 node 是否可用
-        try:
-            result = subprocess.run(
-                ["node", "--version"],
-                capture_output=True,
-                text=True,
-                check=True,
+    def _check_environment(self) -> None:
+        if not self.node_binary:
+            raise RuntimeError(
+                "Node.js was not found. Install Node.js 20+ or set TOUTIAO_NODE_BINARY."
             )
-            logger.info(f"Node.js: {result.stdout.strip()}")
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            raise RuntimeError("Node.js 未安装，请先安装 Node.js")
-
-        # 检查 toutiao-ops 是否安装
-        toutiao_js = self.work_dir / "node_modules" / "@openclaw-cn" / "toutiao-ops" / "index.js"
-        if not toutiao_js.exists():
-            logger.warning(f"toutiao-ops 未安装，正在安装...")
-            subprocess.run(
-                ["npm", "install", "@openclaw-cn/toutiao-ops@1.1.4"],
-                cwd=self.work_dir,
-                check=True,
+        if not self.index_js.is_file():
+            raise RuntimeError(
+                "toutiao-ops is not installed. Run `npm install` in the project directory; "
+                f"expected {self.index_js}."
             )
-            logger.info("toutiao-ops 安装完成")
+        result = subprocess.run(
+            [self.node_binary, "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "Node.js failed to start.")
+        logger.info("Node.js: %s", result.stdout.strip())
 
-    def _get_index_js(self) -> Path:
-        return self.work_dir / "node_modules" / "@openclaw-cn" / "toutiao-ops" / "index.js"
+    @staticmethod
+    def _extract_last_json(output: str) -> dict[str, Any] | None:
+        decoder = json.JSONDecoder()
+        objects: list[dict[str, Any]] = []
+        for match in re.finditer(r"\{", output):
+            try:
+                value, _ = decoder.raw_decode(output[match.start() :])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                objects.append(value)
+        return objects[-1] if objects else None
 
-    def _run_toutiao_cmd(self, args: list, timeout: int = 120) -> dict:
-        """运行 toutiao-ops 命令（用 node 直接运行 index.js，绕过 npx 权限问题）"""
-        index_js = self._get_index_js()
-        if not index_js.exists():
-            return {"success": False, "message": f"toutiao-ops 未找到: {index_js}"}
+    @staticmethod
+    def _error_message(payload: dict[str, Any] | None, output: str) -> str:
+        if payload:
+            for key in ("error", "message", "reason"):
+                value = payload.get(key)
+                if value:
+                    return str(value)
+        return output.strip() or "toutiao-ops returned no diagnostic output."
 
-        cmd = ["node", str(index_js)] + args
-        logger.info(f"执行命令: {' '.join(cmd[:3])} ...")
+    def _run_toutiao_cmd(self, args: list[str], timeout: int = 120) -> dict[str, Any]:
+        if not self.node_binary or not self.index_js.is_file():
+            return {
+                "success": False,
+                "returncode": None,
+                "message": f"toutiao-ops is unavailable: {self.index_js}",
+                "output": "",
+                "data": None,
+            }
 
+        cmd = [self.node_binary, str(self.index_js), *args]
+        logger.info("Running toutiao-ops: %s", " ".join(args[:3]))
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
                 cwd=self.work_dir,
+                env={**os.environ, "NO_COLOR": "1"},
             )
-            output = result.stdout + result.stderr
+        except subprocess.TimeoutExpired as exc:
+            partial = "".join(
+                part.decode("utf-8", "replace") if isinstance(part, bytes) else (part or "")
+                for part in (exc.stdout, exc.stderr)
+            )
+            return {
+                "success": False,
+                "returncode": None,
+                "message": f"toutiao-ops timed out after {timeout} seconds.",
+                "output": partial,
+                "data": None,
+            }
+        except OSError as exc:
+            return {
+                "success": False,
+                "returncode": None,
+                "message": str(exc),
+                "output": "",
+                "data": None,
+            }
 
-            if result.returncode == 0:
-                return {"success": True, "message": "命令执行成功", "output": output}
-            else:
-                return {"success": False, "message": output}
+        output = "\n".join(part for part in (result.stdout, result.stderr) if part).strip()
+        payload = self._extract_last_json(output)
+        success = result.returncode == 0 and not (payload and payload.get("error"))
+        return {
+            "success": success,
+            "returncode": result.returncode,
+            "message": "toutiao-ops completed." if success else self._error_message(payload, output),
+            "output": output,
+            "data": payload,
+        }
 
-        except subprocess.TimeoutExpired:
-            return {"success": False, "message": f"命令超时（{timeout}秒）"}
-        except Exception as e:
-            return {"success": False, "message": str(e)}
-
-    def _get_supported_options(self) -> set:
-        """
-        查询 publish article --help，返回当前版本支持的所有选项名称。
-        自适应不同版本的 toutiao-ops，不再硬编码参数。
-        """
+    def _get_supported_options(self) -> set[str]:
         if self._supported_opts is not None:
             return self._supported_opts
-
         result = self._run_toutiao_cmd(["publish", "article", "--help"], timeout=30)
-        output = result.get("message", "") + result.get("output", "")
-
-        # 匹配 --option 格式
-        opts = set(re.findall(r'--([a-zA-Z][\w-]*)', output))
-        logger.info(f"toutiao-ops publish article 支持的参数: {sorted(opts)}")
-
-        self._supported_opts = opts
-        return opts
-
-    def _has_opt(self, name: str) -> bool:
-        """检查当前版本是否支持某个参数"""
-        return name in self._get_supported_options()
+        self._help_output = result.get("output", "")
+        self._supported_opts = set(
+            re.findall(r"--([a-zA-Z][\w-]*)", self._help_output)
+        )
+        if not result["success"] or not {"title", "content-file"}.issubset(
+            self._supported_opts
+        ):
+            raise RuntimeError(
+                "Unable to read compatible `publish article --help` output. "
+                + result.get("message", "")
+            )
+        return self._supported_opts
 
     def check_login(self) -> bool:
-        """检查登录状态"""
-        result = self._run_toutiao_cmd(["auth", "check"])
-        return result["success"] and "已登录" in result.get("message", "")
+        args = ["auth", "check"]
+        if os.environ.get("NON_INTERACTIVE") or os.environ.get("CI"):
+            args.append("--headless")
+        result = self._run_toutiao_cmd(args, timeout=90)
+        payload = result.get("data") or {}
+        logged_in = result["success"] and payload.get("logged_in") is True
+        if not logged_in:
+            logger.error("Toutiao login check failed: %s", result.get("message"))
+        return logged_in
+
+    def login(self) -> dict[str, Any]:
+        return self._run_toutiao_cmd(["auth", "login"], timeout=360)
 
     def publish_article(
         self,
@@ -132,78 +176,73 @@ class ToutiaoPublisher:
         first_publish: bool = True,
         ai_declared: bool = True,
         cover_keyword: str = "",
-    ) -> dict:
-        """
-        发布文章到今日头条
-        自适应 toutiao-ops 版本，根据 --help 动态选择可用参数
-        """
-        # 1. 保存正文到临时文件
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", suffix=".html", delete=False) as f:
-            content_file = f.name
-            f.write(content)
-        logger.info(f"正文已保存到: {content_file}")
-
-        # 2. 生成占位图片
-        placeholder_path = _ensure_placeholder_image()
-
-        # 3. 查询当前版本支持的参数
+    ) -> dict[str, Any]:
         opts = self._get_supported_options()
-
-        # 4. 构建命令参数 —— 只传支持的参数
-        args = ["publish", "article"]
-        args += ["--title", title]
-        args += ["--content-file", content_file]
-
-        # 封面：始终传 --cover 占位图（满足必填）
-        if "cover" in opts:
-            args += ["--cover", placeholder_path]
-            logger.info(f"传 --cover 占位图: {placeholder_path}")
-
-        # 免费图库：根据版本选可用方式
-        if "cover-free" in opts:
-            # 旧版本/本地版本：--cover-free 是 flag
-            args.append("--cover-free")
-            logger.info("使用 --cover-free flag（免费图库）")
-        elif "cover-mode" in opts:
-            # CI 版本：--cover-mode free
-            args += ["--cover-mode", "free"]
-            logger.info("使用 --cover-mode free（免费图库）")
-
-        # 封面关键词：只有支持时才传
-        fallback_keyword = title[:4] if title else "科技"
-        keyword = cover_keyword if cover_keyword else fallback_keyword
-        if "cover-keyword" in opts:
-            args += ["--cover-keyword", keyword]
-            logger.info(f"封面关键词: {keyword}")
-        else:
-            logger.info(f"当前版本不支持 --cover-keyword，跳过（关键词: {keyword}）")
-
-        # 头条首发
-        if first_publish and "first-publish" in opts:
-            args.append("--first-publish")
-
-        # AI声明
-        if ai_declared and "declaration" in opts:
-            args += ["--declaration", "引用AI"]
-        elif ai_declared and "ai-declared" in opts:
-            args.append("--ai-declared")
-
-        # 无头模式
-        if os.environ.get("NON_INTERACTIVE") or os.environ.get("CI"):
-            if "headless" in opts:
-                args.append("--headless")
-                logger.info("使用无头模式运行")
-
-        # 5. 执行发布命令
-        logger.info(f"发布文章: [{category}] {title}")
-        logger.info(f"完整参数: {args}")
-        result = self._run_toutiao_cmd(args, timeout=180)
-
-        # 6. 清理临时文件
+        content_file = ""
         try:
-            os.unlink(content_file)
-        except:
-            pass
+            with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", suffix=".html", delete=False
+            ) as handle:
+                handle.write(content)
+                content_file = handle.name
 
-        return result
+            args = [
+                "publish",
+                "article",
+                "--title",
+                title,
+                "--content-file",
+                content_file,
+            ]
+            if "format" in opts:
+                args += ["--format", "markdown"]
+
+            cover_path = os.environ.get("TOUTIAO_COVER_PATH", "").strip()
+            if cover_path:
+                if not Path(cover_path).is_file():
+                    return {"success": False, "message": f"Cover image not found: {cover_path}"}
+                args += ["--cover", str(Path(cover_path).resolve())]
+                if "cover-mode" in opts:
+                    args += ["--cover-mode", "single"]
+            elif "cover-free" in opts:
+                args.append("--cover-free")
+                if "cover-keyword" in opts:
+                    args += ["--cover-keyword", cover_keyword or title[:8]]
+            else:
+                return {
+                    "success": False,
+                    "message": (
+                        "This toutiao-ops build requires a real cover image. Set "
+                        "TOUTIAO_COVER_PATH or run `npm install` so the bundled compatibility "
+                        "patch enables --cover-free."
+                    ),
+                }
+
+            if first_publish and "first-publish" in opts:
+                args.append("--first-publish")
+            if ai_declared and "declaration" in opts:
+                args += ["--declaration", "引用AI"]
+            if (os.environ.get("NON_INTERACTIVE") or os.environ.get("CI")) and "headless" in opts:
+                args.append("--headless")
+
+            logger.info("Publishing Toutiao article: [%s] %s", category, title)
+            result = self._run_toutiao_cmd(args, timeout=240)
+            payload = result.get("data") or {}
+            confirmed = (
+                result["success"]
+                and payload.get("success") is True
+                and payload.get("action") == "published"
+            )
+            result["success"] = confirmed
+            if confirmed:
+                result["url"] = payload.get("url", "")
+                result["message"] = "Toutiao confirmed the article was published."
+            else:
+                result["message"] = self._error_message(payload, result.get("output", ""))
+            return result
+        finally:
+            if content_file:
+                try:
+                    Path(content_file).unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Could not remove temporary article file: %s", content_file)
