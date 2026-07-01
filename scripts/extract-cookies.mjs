@@ -11,28 +11,36 @@
  */
 import { chromium } from 'playwright-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import { homedir } from 'os';
 import { join } from 'path';
 import { mkdirSync, writeFileSync, existsSync } from 'fs';
 
 chromium.use(StealthPlugin());
 
 const PROJECT_ROOT = process.cwd();
-const userDataDir = join(homedir(), '.toutiao-ops', 'accounts', 'default', 'browser-data');
+const userDataDir = process.env.TOUTIAO_PROFILE_DIR ||
+  join(PROJECT_ROOT, 'data', 'auth', 'browser-profile');
+
+const browserCandidates = process.platform === 'win32'
+  ? [
+      process.env.TOUTIAO_BROWSER_EXECUTABLE,
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    ]
+  : [process.env.TOUTIAO_BROWSER_EXECUTABLE];
+const executablePath = browserCandidates.find(path => path && existsSync(path));
 
 console.log('正在从浏览器会话提取 Cookie...');
 console.log(`浏览器数据目录: ${userDataDir}`);
 
-if (!existsSync(userDataDir)) {
-  console.error('\n❌ 未找到浏览器会话数据！');
-  console.error('请先运行登录: npx toutiao-ops auth login');
-  process.exit(1);
-}
+mkdirSync(userDataDir, { recursive: true });
 
 let context;
 try {
   context = await chromium.launchPersistentContext(userDataDir, {
-    headless: true,
+    headless: false,
+    ...(executablePath ? { executablePath } : {}),
     viewport: { width: 1440, height: 900 },
     locale: 'zh-CN',
     timezoneId: 'Asia/Shanghai',
@@ -44,25 +52,52 @@ try {
     ignoreDefaultArgs: ['--enable-automation'],
   });
 
+  const page = context.pages()[0] || await context.newPage();
+  await page.goto('https://mp.toutiao.com/', {
+    waitUntil: 'domcontentloaded',
+    timeout: 30000,
+  });
+
+  if (!page.url().includes('/profile_v4')) {
+    console.log('\n请在打开的浏览器中使用今日头条 App 扫码登录。');
+    console.log('登录成功后脚本会自动继续，最长等待 5 分钟。');
+    await page.waitForURL(
+      url => url.toString().includes('/profile_v4') && !url.toString().includes('/auth/'),
+      { timeout: 300000 },
+    );
+  }
+
+  await page.waitForLoadState('domcontentloaded').catch(() => {});
+  await page.waitForTimeout(1500);
+
   // 提取所有 Cookie
-  const cookies = await context.cookies();
+  const cookies = (await context.cookies()).filter(cookie =>
+    cookie.domain === 'toutiao.com' || cookie.domain.endsWith('.toutiao.com')
+  );
 
   // 也提取 localStorage 中的关键信息
-  const pages = context.pages();
   let localStorageData = {};
-  if (pages.length > 0) {
-    try {
-      localStorageData = await pages[0].evaluate(() => {
-        const data = {};
-        for (let i = 0; i < localStorage.length; i++) {
-          const key = localStorage.key(i);
-          data[key] = localStorage.getItem(key);
-        }
-        return data;
-      });
-    } catch {
-      // localStorage 可能为空，忽略
-    }
+  try {
+    localStorageData = await page.evaluate(() => {
+      const data = {};
+      const blockedFragments = [
+        'runtime_cache',
+        'runtime_switcher',
+        'console_logs',
+        'slardar',
+      ];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        const normalized = key.toLowerCase();
+        const value = localStorage.getItem(key) || '';
+        if (blockedFragments.some(fragment => normalized.includes(fragment))) continue;
+        if (new TextEncoder().encode(value).length > 8192) continue;
+        data[key] = value;
+      }
+      return data;
+    });
+  } catch {
+    // localStorage 可能为空，忽略
   }
 
   await context.close();
@@ -84,10 +119,7 @@ try {
   console.log(`   Cookie 数量: ${cookies.length}`);
   console.log(`   localStorage 项: ${Object.keys(localStorageData).length}`);
   console.log(`   保存到: ${outputPath}`);
-  console.log(`\n📋 下一步：`);
-  console.log(`   1. 打开 ${outputPath}`);
-  console.log(`   2. 复制全部内容`);
-  console.log(`   3. 在 GitHub 仓库 Settings → Secrets → Actions 中添加 TOUTIAO_COOKIES`);
+  console.log(`\n下一步：将该文件写入 GitHub Secret TOUTIAO_COOKIES。`);
 } catch (err) {
   console.error('\n❌ 提取失败:', err.message);
   if (context) await context.close().catch(() => {});
