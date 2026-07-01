@@ -138,16 +138,24 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
     # 初始化发布器（非 dry_run 才需要）
     publisher = ToutiaoPublisher(work_dir=str(PROJECT_ROOT)) if not dry_run else None
 
-    # 检查登录状态（仅真实发布模式，不阻塞执行）
+    # Verify the session before spending API calls on articles that cannot publish.
     if not dry_run and publisher:
         if not publisher.check_login():
-            logger.warning("⚠️ 头条登录状态检查失败，仍尝试发布（若失败请更新 TOUTIAO_COOKIES Secret）")
+            logger.error("Toutiao is not logged in. Refresh TOUTIAO_COOKIES before publishing.")
+            stats["failed"] = len(selected)
+            stats["error"] = "toutiao_not_logged_in"
+            stats["end_time"] = datetime.now().isoformat()
+            return stats
         else:
-            logger.info("✅ 头条登录状态正常")
+            logger.info("Toutiao login session is valid.")
 
     # 加载历史记录（避免重复发布）
     history = load_published_history()
-    published_titles = {h.get("title", "") for h in history}
+    published_titles = {
+        h.get("source_topic", "")
+        for h in history
+        if h.get("success") is True and not h.get("dry_run")
+    }
 
     # 逐个生成并发布
     for i, topic in enumerate(selected, 1):
@@ -190,6 +198,7 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
                 if result["success"]:
                     stats["published"] += 1
                     logger.info(f"  ✅ 发布成功: {article['title']}")
+                    published_titles.add(topic["title"])
                 else:
                     stats["failed"] += 1
                     logger.error(f"  ❌ 发布失败: {result['message']}")
@@ -201,30 +210,21 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
                     "category": topic["category"],
                     "published_at": datetime.now().isoformat(),
                     "success": result["success"],
+                    "publish_url": result.get("url", ""),
+                    "publish_message": result.get("message", ""),
                     "article_file": str(article_file),
                 })
                 save_published_history(history)
-                published_titles.add(topic["title"])
             else:
                 # dry_run 模式：只保存文章，不发布
                 logger.info(f"  (dry_run 模式，跳过发布，文章已保存: {article_file.name})")
-                history.append({
-                    "title": article["title"],
-                    "source_topic": topic["title"],
-                    "category": article["category"],
-                    "published_at": datetime.now().isoformat(),
-                    "success": True,
-                    "article_file": str(article_file),
-                    "dry_run": True,
-                })
-                save_published_history(history)
 
             stats["generated"] += 1
             stats["articles"].append({
                 "title": article["title"],
                 "category": article["category"],
                 "source": topic["title"],
-                "success": True,
+                "success": dry_run or result["success"],
             })
 
             # 间隔等待，避免发布太快
@@ -236,6 +236,12 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
         except Exception as e:
             logger.error(f"  ❌ 处理失败: {e}")
             stats["failed"] += 1
+            status_code = getattr(e, "status_code", None)
+            message = str(e).lower()
+            if status_code in (401, 403) or "authentication" in message or "api key" in message:
+                stats["error"] = "ai_authentication_failed"
+                logger.error("Stopping this run because the AI API credentials are invalid.")
+                break
             continue
 
     stats["end_time"] = datetime.now().isoformat()
@@ -299,6 +305,9 @@ def main():
         print(f"  生成文章: {stats['generated']} 篇")
         print(f"  发布成功: {stats['published']} 篇")
         print(f"  发布失败: {stats['failed']} 篇")
+        if stats.get("failed", 0) > 0 or stats.get("error"):
+            logger.error("Run completed with failures; returning a non-zero exit code.")
+            raise SystemExit(1)
         return
 
     # 默认：启动定时调度

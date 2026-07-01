@@ -6,14 +6,14 @@ name: 热搜自动发文
 on:
   # 定时触发（UTC时间，北京时间 = UTC+8）
   schedule:
-    - cron: "0 0,2,4,6,8,10,12,14 * * *"  # 每2小时，共8次（北京时间 8:00-22:00）
+    - cron: "0 2 * * *"  # 每天北京时间 10:00 执行一次
   # 手动触发
   workflow_dispatch:
     inputs:
       count:
         description: "本次发布文章数量"
         required: false
-        default: "10"
+        default: "1"
       dry_run:
         description: "仅生成不发布（true=只写文章不发头条）"
         required: false
@@ -65,7 +65,7 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
           cat > config.yaml << EOF
-          daily_count: 10
+          daily_count: 1
           deepseek:
             api_key: "${DEEPSEEK_API_KEY}"
             base_url: "https://api.deepseek.com"
@@ -96,10 +96,12 @@ jobs:
 
       # ====== 8. 注入头条 Cookie ======
       - name: 注入头条登录 Cookie
+        env:
+          TOUTIAO_COOKIES: ${{ secrets.TOUTIAO_COOKIES }}
         run: |
           mkdir -p data/auth
-          if [ -n "${{ secrets.TOUTIAO_COOKIES }}" ]; then
-            echo '${{ secrets.TOUTIAO_COOKIES }}' > data/auth/cookies.json
+          if [ -n "$TOUTIAO_COOKIES" ]; then
+            printf '%s' "$TOUTIAO_COOKIES" > data/auth/cookies.json
             echo "Cookie 文件已写入，开始注入到浏览器会话..."
             node scripts/inject-cookies.mjs
             echo "✅ Cookie 注入成功"
@@ -128,7 +130,7 @@ jobs:
           DRY_RUN="${{ github.event.inputs.dry_run }}"
 
           # 默认值（定时触发时 inputs 为空，默认正式发布）
-          if [ -z "$COUNT" ]; then COUNT="10"; fi
+          if [ -z "$COUNT" ]; then COUNT="1"; fi
           if [ -z "$DRY_RUN" ]; then DRY_RUN="false"; fi
 
           echo "发布数量: $COUNT，Dry Run: $DRY_RUN"

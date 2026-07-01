@@ -23,6 +23,7 @@ venv/
 
 # Node.js
 node_modules/
+.packages/
 
 # 系统
 .DS_Store

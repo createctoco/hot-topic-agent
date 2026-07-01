@@ -19,7 +19,7 @@ services:
       # 配置文件
       - ./config.yaml:/app/config.yaml:ro
     # 模式选择：
-    #   scheduler - 启动定时调度（每天10篇，8:00-22:00自动发）
+    #   scheduler - 启动定时调度（每天1篇，默认10:00自动发）
     #   once      - 只执行一次然后退出
     #   login     - 登录头条（需要 VNC 或本地执行）
     command: ["python3", "main.py"]

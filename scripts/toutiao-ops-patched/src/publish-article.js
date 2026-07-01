@@ -1,4 +1,5 @@
-import { readFileSync } from 'fs';
+import { mkdirSync, readFileSync } from 'fs';
+import { join } from 'path';
 import { marked } from 'marked';
 import { launchBrowser, closeBrowser, sleep, waitForStable, dismissOverlays } from './browser.js';
 import { ensureLoggedIn } from './auth-guard.js';
@@ -107,26 +108,42 @@ export async function publishArticle(opts) {
       };
     }
 
-    // 点击"预览并发布"按钮
+    // Click preview/publish and require observable confirmation. The upstream
+    // implementation swallowed missing confirmation buttons and returned a
+    // false success even though no article had been published.
     await dismissOverlays(page);
     const publishBtn = page.locator('button:has-text("预览并发布")').first();
-    await publishBtn.scrollIntoViewIfNeeded().catch(() => {});
+    await publishBtn.waitFor({ state: 'visible', timeout: 15000 });
+    await publishBtn.scrollIntoViewIfNeeded();
     await sleep(300, 500);
     await publishBtn.click({ force: true, timeout: 10000 });
     await sleep(3000, 5000);
     await waitForStable(page);
 
-    // 预览页面需要再次点击"确认发布"
+    // The preview page normally requires a second confirmation. Some account
+    // variants publish directly, so first check for an already completed flow.
+    let published = await hasPublishConfirmation(page);
     const confirmPublish = page.locator('button:has-text("确认发布"), button:has-text("发布")').first();
-    await confirmPublish.click({ timeout: 10000 }).catch(() => {});
-    await sleep(2000, 4000);
+    if (!published && await confirmPublish.isVisible({ timeout: 10000 }).catch(() => false)) {
+      await confirmPublish.click({ timeout: 10000 });
+      await sleep(2000, 4000);
+    }
 
-    // 可能还有二次确认弹窗
+    // Optional secondary modal.
     const confirmBtn = page.locator('button:has-text("确定"), button:has-text("确认")').first();
-    await confirmBtn.click({ timeout: 5000 }).catch(() => {});
+    if (await confirmBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await confirmBtn.click({ timeout: 5000 });
+    }
 
-    await sleep(2000, 4000);
-    await waitForStable(page);
+    published = await waitForPublishConfirmation(page, 20000);
+    if (!published) {
+      const pageError = await readVisiblePublishError(page);
+      const screenshot = await capturePublishFailure(page);
+      throw new Error(
+        `Toutiao did not confirm publication${pageError ? `: ${pageError}` : ''}. ` +
+        `Current URL: ${page.url()}. Screenshot: ${screenshot}`
+      );
+    }
 
     return {
       success: true,
@@ -145,27 +162,22 @@ async function setCoverMode(page, mode, coverPath, coverKeyword = '') {
       single: '单图',
       triple: '三图',
       none: '无封面',
-      free: '免费图库',
     };
-    const label = modeLabels[mode] || modeLabels.single;
+    // Free-library images still use the single-cover layout. "免费图库" is
+    // a tab inside the image picker, not a cover-mode radio on the main page.
+    const label = mode === 'free' ? modeLabels.single : (modeLabels[mode] || modeLabels.single);
 
     const radio = page.locator(`text=${label}`).first();
     await radio.click({ timeout: 5000 });
     await sleep(500, 800);
 
     if (mode === 'free') {
-      // 免费图库模式
+      await openCoverPanel(page);
       await selectFromFreeLibrary(page, coverKeyword);
     } else if (mode !== 'none' && coverPath) {
       const paths = coverPath.split(',').map(p => p.trim()).filter(Boolean);
 
-      // 点击封面区域的 + 号，打开图片上传侧边栏
-      const coverArea = page.locator('[class*="cover"] [class*="add"], [class*="cover"] [class*="upload"], [class*="cover"] [class*="plus"]').first();
-      await coverArea.click({ timeout: 5000 }).catch(async () => {
-        // 备选：点击"预览"旁的 + 号
-        await page.locator('[class*="cover-upload"]').first().click({ timeout: 3000 });
-      });
-      await sleep(1000, 2000);
+      await openCoverPanel(page);
 
       // 侧边栏打开后，点击"本地上传"按钮触发文件选择
       const [fileChooser] = await Promise.all([
@@ -185,13 +197,68 @@ async function setCoverMode(page, mode, coverPath, coverKeyword = '') {
       await confirmBtn.click();
       await sleep(1000, 2000);
     }
-  } catch {
+  } catch (error) {
     // 封面上传失败，尝试关闭可能残留的侧边栏
     await page.locator('.byte-drawer-wrapper button:has-text("取消")').first()
       .click({ timeout: 3000 }).catch(() => {});
     await page.keyboard.press('Escape').catch(() => {});
     await sleep(500, 800);
+    if (mode === 'free' || (mode !== 'none' && coverPath)) {
+      throw new Error(`Cover selection failed: ${error.message}`);
+    }
   }
+}
+
+async function openCoverPanel(page) {
+  const coverArea = page.locator(
+    '[class*="cover"] [class*="add"], [class*="cover"] [class*="upload"], ' +
+    '[class*="cover"] [class*="plus"], [class*="cover-upload"]'
+  ).first();
+  await coverArea.waitFor({ state: 'visible', timeout: 10000 });
+  await coverArea.click({ timeout: 10000 });
+  await sleep(1000, 2000);
+}
+
+async function hasPublishConfirmation(page) {
+  const success = page.getByText(/发布成功|提交成功|已发布/).first();
+  if (await success.isVisible({ timeout: 1000 }).catch(() => false)) return true;
+  const url = page.url();
+  if (url.includes('/auth/') || url.includes('sso.toutiao.com')) return false;
+  return /profile_v4\/(graphic\/)?(content|manage|home)/.test(url);
+}
+
+async function waitForPublishConfirmation(page, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await hasPublishConfirmation(page)) return true;
+    await page.waitForTimeout(500);
+  }
+  return false;
+}
+
+async function readVisiblePublishError(page) {
+  const selectors = [
+    '.byte-message-error',
+    '.byte-notification-error',
+    '[class*="error"]',
+    '[role="alert"]',
+  ];
+  for (const selector of selectors) {
+    const item = page.locator(selector).first();
+    if (await item.isVisible({ timeout: 300 }).catch(() => false)) {
+      const text = (await item.innerText().catch(() => '')).trim();
+      if (text) return text.slice(0, 500);
+    }
+  }
+  return '';
+}
+
+async function capturePublishFailure(page) {
+  const directory = join(process.cwd(), 'data', 'logs');
+  mkdirSync(directory, { recursive: true });
+  const target = join(directory, `toutiao-publish-failed-${Date.now()}.png`);
+  await page.screenshot({ path: target, fullPage: true }).catch(() => {});
+  return target;
 }
 
 async function selectFromFreeLibrary(page, keyword) {
@@ -201,11 +268,15 @@ async function selectFromFreeLibrary(page, keyword) {
     
     // 点击"免费图库"标签
     const freeTab = page.locator('text=免费图库').first();
-    await freeTab.click({ timeout: 5000 }).catch(() => {});
+    await freeTab.waitFor({ state: 'visible', timeout: 10000 });
+    await freeTab.click({ timeout: 5000 });
     await sleep(1500, 2500);
     
     // 在搜索框输入关键词
-    const searchInput = page.locator('input[type="text"], input[placeholder*="搜索"], [class*="search"] input').first();
+    const searchInput = page.locator(
+      '.byte-drawer-wrapper input[placeholder*="搜索"], ' +
+      '[class*="image"] input[placeholder*="搜索"], [class*="library"] input'
+    ).first();
     await searchInput.fill(keyword || '科技', { timeout: 5000 });
     await sleep(500, 800);
     await page.keyboard.press('Enter');
@@ -223,7 +294,7 @@ async function selectFromFreeLibrary(page, keyword) {
     console.log('[free-library] 免费图库选择完成');
   } catch (e) {
     console.error('[free-library] 免费图库选择失败:', e.message);
-    // 失败时不阻塞发布流程
+    throw e;
   }
 }
 

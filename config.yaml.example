@@ -4,7 +4,7 @@
 # ============================================
 
 # 每天发布文章数量
-daily_count: 10
+daily_count: 1
 
 # DeepSeek API 配置
 deepseek:

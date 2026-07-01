@@ -1,6 +1,6 @@
 """
 定时调度模块
-每天发布10篇文章，分散在 8:00-22:00 之间
+每天发布1篇文章，默认北京时间10:00执行
 """
 import os
 import time
@@ -12,16 +12,16 @@ from main import run_once, load_config
 logger = logging.getLogger("scheduler")
 
 
-def generate_schedule_times(daily_count: int = 10) -> list:
+def generate_schedule_times(daily_count: int = 1) -> list:
     """
     生成每天发布的时间点列表
-    10篇文章分散在 8:00-22:00 之间，间隔约1.4小时
+    One daily article runs at 10:00. Higher explicit values remain supported.
     """
     start_hour = 8
     end_hour = 22
     total_minutes = (end_hour - start_hour) * 60
     if daily_count <= 1:
-        return [f"{start_hour:02d}:00"]
+        return ["10:00"]
 
     interval = total_minutes // (daily_count - 1)
     times = []
@@ -50,7 +50,7 @@ def start_scheduler(config: dict):
     """
     启动定时调度
     """
-    daily_count = config.get("daily_count", 10)
+    daily_count = config.get("daily_count", 1)
 
     # 生成发布时间表
     times = generate_schedule_times(daily_count)
