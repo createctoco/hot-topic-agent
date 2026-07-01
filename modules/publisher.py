@@ -211,9 +211,12 @@ class ToutiaoPublisher:
                 if "cover-mode" in opts:
                     args += ["--cover-mode", "single"]
             elif "cover-mode" in opts:
-                # Toutiao removed the free-library tab from some publisher UI
-                # variants. No-cover mode is the only deterministic fallback.
-                args += ["--cover-mode", "none"]
+                # Prefer Toutiao's licensed free-image library. The bundled
+                # publisher automatically falls back to no cover when that UI
+                # is unavailable for the current account or editor variant.
+                args += ["--cover-mode", "free"]
+                if "cover-keyword" in opts:
+                    args += ["--cover-keyword", cover_keyword or title[:8]]
             elif "cover-free" in opts:
                 args.append("--cover-free")
                 if "cover-keyword" in opts:

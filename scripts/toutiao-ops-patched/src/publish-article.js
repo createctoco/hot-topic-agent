@@ -203,7 +203,14 @@ async function setCoverMode(page, mode, coverPath, coverKeyword = '') {
       .click({ timeout: 3000 }).catch(() => {});
     await page.keyboard.press('Escape').catch(() => {});
     await sleep(500, 800);
-    if (mode === 'free' || (mode !== 'none' && coverPath)) {
+    if (mode === 'free') {
+      console.warn(`[free-library] 免费正版图库不可用，自动切换为无封面: ${error.message}`);
+      const noCover = page.getByText('无封面', { exact: true }).first();
+      await noCover.click({ timeout: 5000 });
+      await sleep(500, 800);
+      return;
+    }
+    if (mode !== 'none' && coverPath) {
       throw new Error(`Cover selection failed: ${error.message}`);
     }
   }
@@ -266,8 +273,9 @@ async function selectFromFreeLibrary(page, keyword) {
     console.log('[free-library] 正在使用免费图库，关键词:', keyword);
     await sleep(1000, 2000);
     
-    // 点击"免费图库"标签
-    const freeTab = page.locator('text=免费图库').first();
+    // Different editor variants use "免费图库", "免费正版图库" or
+    // "免费正版图片" for the same licensed-image picker.
+    const freeTab = page.getByText(/免费(?:正版)?(?:图库|图片)/).first();
     await freeTab.waitFor({ state: 'visible', timeout: 10000 });
     await freeTab.click({ timeout: 5000 });
     await sleep(1500, 2500);
