@@ -8,6 +8,13 @@ import logging
 from typing import Dict, Optional
 from openai import OpenAI
 
+from modules.content_policy import (
+    ContentPolicyError,
+    validate_article,
+    validate_generated_title,
+    validate_topic,
+)
+
 logger = logging.getLogger(__name__)
 
 # 领域写作风格
@@ -76,6 +83,7 @@ class AIWriter:
         """
         根据热搜关键词生成文章标题
         """
+        validate_topic(hot_title, category)
         style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["科技"])
 
         prompt = f"""你是今日头条的{style['perspective']}，请根据以下热搜关键词，生成一个吸引人的文章标题。
@@ -89,6 +97,8 @@ class AIWriter:
 3. 不要标题党，不要夸张
 4. 不要用感叹号
 5. 只返回标题本身，不要引号、不要序号、不要其他内容
+6. 只讨论科技、AI、外贸或跨境电商业务，不涉及政治、军事、政治人物或国家评价
+7. 不使用攻击、贬损、煽动或未经证实的指控
 
 生成标题："""
 
@@ -102,14 +112,27 @@ class AIWriter:
         title = title.strip().strip('"').strip("'").strip("《》").strip("【】")
         # 去掉可能的前缀序号
         title = title.lstrip("1234567890.、) ")
+        try:
+            validate_generated_title(title, category, hot_title)
+        except ContentPolicyError:
+            title = hot_title[:30].strip("，。！？!?：: ")
+            validate_generated_title(title, category, hot_title)
+            logger.warning("生成标题未通过边界检查，已改用保守标题: %s", title)
         logger.info(f"生成标题: {title}")
         return title
 
-    def generate_article(self, hot_title: str, category: str, platform: str = "") -> Dict:
+    def generate_article(
+        self,
+        hot_title: str,
+        category: str,
+        platform: str = "",
+        source_url: str = "",
+    ) -> Dict:
         """
         根据热搜关键词生成完整文章
         返回: {"title": str, "content": str, "category": str}
         """
+        validate_topic(hot_title, category)
         style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["科技"])
 
         # 先生成标题
@@ -119,6 +142,7 @@ class AIWriter:
         content_prompt = f"""你是今日头条的{style['perspective']}，请围绕以下热搜话题，写一篇深度文章。
 
 热搜话题：{hot_title}（来源：{platform}）
+来源链接：{source_url or '未提供'}
 领域：{category}
 写作风格：{style['tone']}
 重点关注：{style['focus']}
@@ -127,11 +151,17 @@ class AIWriter:
 1. 字数2000-3000字
 2. 结构清晰，使用小标题分段
 3. 开头要吸引人，用一段话引出话题
-4. 中间要有数据、案例、分析
+4. 提供具体、可执行的信息；不得编造数据、案例、引语、认证或调查结论
 5. 结尾要有观点总结和展望
 6. 语言要通俗易懂，避免过于学术
 7. 不要写"编者按""导语"等元信息
 8. 直接写正文内容
+9. 内容只限科技、AI、外贸、跨境电商，不讨论政治、军事、政治人物或国际冲突
+10. 不贬损中国或任何国家、地区和群体，不使用煽动性、对立性表达
+11. 遇到无法从题目和来源确认的事实，删除该事实，不猜测、不补造
+12. 每段表达一个明确观点，给出原因、影响或操作建议，避免套话和空泛结论
+13. 关于具体公司、人物或产品，只能复述热搜标题明确表达的事实；不得推断其动机、内部措施、技术路线、供应链安排或未来计划
+14. 除热搜标题明确包含的信息外，正文改写为不依赖具体公司的行业通用原理、检查清单和操作方法
 
 文章内容："""
 
@@ -141,7 +171,19 @@ class AIWriter:
         ]
 
         logger.info(f"正在生成文章: [{category}] {title}")
-        content = self._call_api(messages, max_tokens=4096, temperature=0.85)
+        content = self._call_api(messages, max_tokens=4096, temperature=0.65)
+        content = self._review_and_rewrite(
+            title=title,
+            content=content,
+            hot_title=hot_title,
+            category=category,
+        )
+        content = self._enforce_policy_with_rewrite(
+            title=title,
+            content=content,
+            hot_title=hot_title,
+            category=category,
+        )
 
         # 将正文转为适合头条发布的HTML格式
         html_content = self._format_to_html(title, content, category)
@@ -152,11 +194,115 @@ class AIWriter:
             "raw_content": content,
             "category": category,
             "source_topic": hot_title,
+            "source_url": source_url,
             "image_keywords": self._generate_image_keywords(hot_title, category),
         }
 
         logger.info(f"文章生成完成: {title} ({len(content)}字)")
         return result
+
+    def _review_and_rewrite(self, title: str, content: str, hot_title: str, category: str) -> str:
+        """Run a low-temperature editorial pass before deterministic validation."""
+        prompt = f"""你是严格的中文科技商业编辑。请审校并重写下面的文章，直接输出修订后的正文。
+
+标题：{title}
+原始话题：{hot_title}
+领域：{category}
+
+硬性要求：
+1. 只保留科技、AI、外贸或跨境电商相关内容。
+2. 删除政治、军事、政治人物、国际冲突、国家对立和贬损中国或其他国家群体的内容。
+3. 修复病句、歧义、搭配错误、指代不清、前后矛盾和不完整句子。
+4. 删除空洞套话、重复段落和模糊观点；每段必须提供明确事实边界、原因、影响或可执行建议。
+5. 输入材料只有话题标题，不足以支持新闻事实。不得添加年份、比例、人数、报告、爆料、调查、引语或真实企业已经实施某项行为的断言。
+6. 不得把推测写成事实。只能写概念解释、通用机制、风险识别方法和不依赖特定企业的实用建议。
+7. 保持约1800至3000个中文字符，使用清晰的小标题和自然段。
+8. 标题和正文不得使用“惊现、暗藏玄机、震惊、内幕、伦理拷问、细思极恐”等标题党或文学化表达。
+9. 不输出审校说明、评分、Markdown代码围栏或“作为AI”等元信息。
+10. 具体公司或人物只允许在开头复述原始话题一次；后文不得推断其动机、内部措施、供应链安排、技术路线或未来计划。
+
+待审文章：
+{content}
+"""
+        messages = [
+            {
+                "role": "system",
+                "content": "你负责中文商业科技内容的事实边界、语法、逻辑和信息密度审校。",
+            },
+            {"role": "user", "content": prompt},
+        ]
+        reviewed = self._call_api(messages, max_tokens=4096, temperature=0.2).strip()
+        if reviewed.startswith("```"):
+            reviewed = reviewed.strip("`")
+            reviewed = reviewed.removeprefix("markdown").strip()
+        logger.info("文章二次审校完成: %s (%s字)", title, len(reviewed))
+        return reviewed
+
+    def _enforce_policy_with_rewrite(
+        self,
+        title: str,
+        content: str,
+        hot_title: str,
+        category: str,
+    ) -> str:
+        """Automatically repair one policy failure before rejecting a topic."""
+        try:
+            validate_article(title, content, category)
+            return content
+        except ContentPolicyError as error:
+            logger.warning("初次质量检查未通过，启动自动安全重写: %s", error)
+            rewritten = self._safe_rewrite(
+                title=title,
+                content=content,
+                hot_title=hot_title,
+                category=category,
+                rejection_reason=str(error),
+            )
+            validate_article(title, rewritten, category)
+            logger.info("自动安全重写通过质量检查: %s (%s字)", title, len(rewritten))
+            return rewritten
+
+    def _safe_rewrite(
+        self,
+        title: str,
+        content: str,
+        hot_title: str,
+        category: str,
+        rejection_reason: str,
+    ) -> str:
+        """Rewrite rejected copy into evergreen, source-bounded business content."""
+        prompt = f"""你是中文科技商业稿件的终审编辑。下面文章未通过自动检查，请重写整篇正文。
+
+标题：{title}
+原始话题：{hot_title}
+领域：{category}
+自动检查拒绝原因：{rejection_reason}
+
+必须执行：
+1. 删除所有政治、政府、政党、选举、外交、制裁、军事、战争、战场、武器、政治人物、国际冲突和国家对立内容；比喻用法也要删除。
+2. 删除无法由输入标题直接支持的年份、比例、人数、金额、报告、统计、调查、爆料、引语、内部消息和企业已实施行为。
+3. 不补造新闻细节。改写为技术原理、行业通用机制、风险识别步骤和可执行建议。
+4. 只聚焦科技、AI、外贸或跨境电商，不评价中国或任何国家、地区和群体。
+5. 修复病句、歧义、指代不清、前后矛盾和不完整句子；删除套话、重复和模糊观点。
+6. 保留8个以上自然段或小标题、18个以上完整句子，总长度约1800至3000个中文字符。
+7. 不输出说明、评分、引用列表、代码围栏或“作为AI”等元信息，只输出修订后的正文。
+8. 具体公司或人物只允许在开头复述原始话题一次；后文统一使用“科技企业”“跨境卖家”等通用主体，不推断其内部措施或动机。
+
+待重写正文：
+{content}
+"""
+        messages = [
+            {
+                "role": "system",
+                "content": "你只做保守、可验证、无敏感议题的中文科技商业稿件终审。",
+            },
+            {"role": "user", "content": prompt},
+        ]
+        rewritten = self._call_api(messages, max_tokens=4096, temperature=0.1).strip()
+        if rewritten.startswith("```"):
+            rewritten = rewritten.strip("`")
+            rewritten = rewritten.removeprefix("markdown").strip()
+        return rewritten
 
     def _generate_image_keywords(self, hot_title: str, category: str) -> list:
         """让AI生成3个配图关键词（中文，适配头条免费图库）"""

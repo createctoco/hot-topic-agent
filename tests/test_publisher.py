@@ -71,21 +71,37 @@ class PublisherTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["url"], "https://mp.toutiao.com/content")
 
-    def test_uses_no_cover_when_no_real_cover_is_configured(self):
+    def test_uses_free_library_with_keyword_when_no_local_cover_is_configured(self):
         publisher = self.make_publisher()
-        publisher._supported_opts.add("cover-mode")
+        publisher._supported_opts.update({"cover-mode", "cover-keyword"})
         fake = {
             "success": True,
             "output": '{"success":true,"action":"published"}',
             "data": {"success": True, "action": "published"},
         }
         with patch.object(publisher, "_run_toutiao_cmd", return_value=fake) as runner:
-            result = publisher.publish_article("A valid title", "<p>body</p>")
+            result = publisher.publish_article(
+                "A valid title", "<p>body</p>", cover_keyword="人工智能"
+            )
         args = runner.call_args.args[0]
         self.assertTrue(result["success"])
         self.assertIn("--cover-mode", args)
-        self.assertEqual(args[args.index("--cover-mode") + 1], "none")
+        self.assertEqual(args[args.index("--cover-mode") + 1], "free")
+        self.assertEqual(args[args.index("--cover-keyword") + 1], "人工智能")
         self.assertNotIn("--cover-free", args)
+
+    def test_declares_network_source_and_ai_participation(self):
+        publisher = self.make_publisher()
+        fake = {
+            "success": True,
+            "output": '{"success":true,"action":"published"}',
+            "data": {"success": True, "action": "published"},
+        }
+        with patch.object(publisher, "_run_toutiao_cmd", return_value=fake) as runner:
+            publisher.publish_article("A valid title", "<p>body</p>")
+        args = runner.call_args.args[0]
+        self.assertIn("--declaration", args)
+        self.assertEqual(args[args.index("--declaration") + 1], "取材网络,引用AI")
 
 
 if __name__ == "__main__":

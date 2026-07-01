@@ -6,6 +6,8 @@ import re
 import logging
 from typing import List, Dict
 
+from modules.content_policy import ContentPolicyError, validate_topic
+
 logger = logging.getLogger(__name__)
 
 # 四大领域关键词库（大幅扩充，提高匹配率）
@@ -101,6 +103,8 @@ EXCLUDE_KEYWORDS = [
     "女主", "男主", "男主", "主演", "剧情", "番外",
     "电视剧", "电影", "追剧", "热播", "大结局",
     "cos", "Cos", "COS", "cosplay", "角色扮演",
+    "婚礼", "结婚", "恋情", "离婚", "演唱会", "歌手", "演员", "红毯", "穿搭", "粉丝",
+    "叶文洁", "惊现", "暗藏玄机", "伦理拷问", "细思极恐",
 ]
 
 
@@ -129,6 +133,10 @@ def match_category(title: str) -> str:
         priority = ["跨境电商", "外贸", "AI", "科技"]
         for cat in priority:
             if cat in matched_categories:
+                try:
+                    validate_topic(title, cat)
+                except ContentPolicyError:
+                    return None
                 return cat
 
     return None
@@ -164,6 +172,16 @@ def filter_items(items: List[Dict]) -> Dict[str, List[Dict]]:
         logger.info(f"  {cat}: {len(items_list)} 条")
 
     return result
+
+
+def exclude_published_topics(
+    filtered: Dict[str, List[Dict]], published_titles: set[str]
+) -> Dict[str, List[Dict]]:
+    """Remove previously published source topics before quota selection."""
+    return {
+        category: [item for item in items if item.get("title") not in published_titles]
+        for category, items in filtered.items()
+    }
 
 
 def select_topics(filtered: Dict[str, List[Dict]], count: int = 10) -> List[Dict]:
