@@ -28,6 +28,13 @@ class PublisherTests(unittest.TestCase):
             {"success": True, "action": "published"},
         )
 
+    def test_extracts_outer_json_instead_of_nested_object(self):
+        output = 'log\n{"success":true,"result":{"id":123}}\n'
+        self.assertEqual(
+            ToutiaoPublisher._extract_last_json(output),
+            {"success": True, "result": {"id": 123}},
+        )
+
     def test_login_uses_structured_logged_in_value(self):
         publisher = self.make_publisher()
         with patch.object(

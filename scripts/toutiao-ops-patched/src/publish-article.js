@@ -220,9 +220,11 @@ async function openCoverPanel(page) {
 }
 
 async function hasPublishConfirmation(page) {
-  if (!page.url().includes('/graphic/publish')) return true;
   const success = page.getByText(/发布成功|提交成功|已发布/).first();
-  return success.isVisible({ timeout: 1000 }).catch(() => false);
+  if (await success.isVisible({ timeout: 1000 }).catch(() => false)) return true;
+  const url = page.url();
+  if (url.includes('/auth/') || url.includes('sso.toutiao.com')) return false;
+  return /profile_v4\/(graphic\/)?(content|manage|home)/.test(url);
 }
 
 async function waitForPublishConfirmation(page, timeoutMs) {

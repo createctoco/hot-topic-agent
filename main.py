@@ -236,6 +236,12 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
         except Exception as e:
             logger.error(f"  ❌ 处理失败: {e}")
             stats["failed"] += 1
+            status_code = getattr(e, "status_code", None)
+            message = str(e).lower()
+            if status_code in (401, 403) or "authentication" in message or "api key" in message:
+                stats["error"] = "ai_authentication_failed"
+                logger.error("Stopping this run because the AI API credentials are invalid.")
+                break
             continue
 
     stats["end_time"] = datetime.now().isoformat()

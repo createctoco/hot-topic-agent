@@ -62,6 +62,11 @@ class AIWriter:
                 return response.choices[0].message.content.strip()
             except Exception as e:
                 logger.warning(f"API调用失败 (第{attempt+1}次): {e}")
+                status_code = getattr(e, "status_code", None)
+                message = str(e).lower()
+                if status_code in (401, 403) or "authentication" in message or "api key" in message:
+                    logger.error("AI API authentication failed; retries will not help.")
+                    raise
                 if attempt < max_retries - 1:
                     time.sleep(5 * (attempt + 1))  # 指数退避
                 else:

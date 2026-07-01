@@ -63,15 +63,20 @@ class ToutiaoPublisher:
     @staticmethod
     def _extract_last_json(output: str) -> dict[str, Any] | None:
         decoder = json.JSONDecoder()
-        objects: list[dict[str, Any]] = []
+        objects: list[tuple[int, int, dict[str, Any]]] = []
         for match in re.finditer(r"\{", output):
             try:
-                value, _ = decoder.raw_decode(output[match.start() :])
+                value, length = decoder.raw_decode(output[match.start() :])
             except json.JSONDecodeError:
                 continue
             if isinstance(value, dict):
-                objects.append(value)
-        return objects[-1] if objects else None
+                objects.append((match.start(), match.start() + length, value))
+        if not objects:
+            return None
+        # Prefer the object ending latest in the stream. If nested objects share
+        # the same end position, select the earliest start (the outer object).
+        _, _, value = max(objects, key=lambda item: (item[1], -item[0]))
+        return value
 
     @staticmethod
     def _error_message(payload: dict[str, Any] | None, output: str) -> str:
