@@ -72,6 +72,22 @@ def validate_topic(title: str, category: str) -> None:
         raise ContentPolicyError("hype or off-topic title: " + ", ".join(hype))
 
 
+def validate_generated_title(title: str, category: str, source_title: str) -> None:
+    """Reject factual claims introduced by the generated title itself."""
+    validate_topic(title, category)
+    introduced_claims: list[str] = []
+    for pattern in UNSUPPORTED_CLAIM_PATTERNS:
+        for match in re.finditer(pattern, title):
+            claim = match.group(0)
+            if claim not in source_title:
+                introduced_claims.append(claim)
+    if introduced_claims:
+        raise ContentPolicyError(
+            "generated title introduced unsupported claims: "
+            + ", ".join(sorted(set(introduced_claims)))
+        )
+
+
 def plain_text(html_or_text: str) -> str:
     text = re.sub(r"<[^>]+>", "\n", html_or_text or "")
     return unescape(text).strip()

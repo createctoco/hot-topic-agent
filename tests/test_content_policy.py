@@ -1,6 +1,11 @@
 import unittest
 
-from modules.content_policy import ContentPolicyError, validate_article, validate_topic
+from modules.content_policy import (
+    ContentPolicyError,
+    validate_article,
+    validate_generated_title,
+    validate_topic,
+)
 from modules.keyword_filter import exclude_published_topics, select_topics
 
 
@@ -43,6 +48,21 @@ class ContentPolicyTests(unittest.TestCase):
         paragraphs = [f"第{i}部分说明企业未来3至5年的技术规划和通用方法。" for i in range(25)]
         with self.assertRaises(ContentPolicyError):
             validate_article("人工智能应用方法", "\n".join(paragraphs), "AI")
+
+    def test_generated_title_cannot_invent_a_percentage(self):
+        with self.assertRaises(ContentPolicyError):
+            validate_generated_title(
+                "中端模型涨价，用户成本增加20%",
+                "AI",
+                "中端模型发布变相涨价版本",
+            )
+
+    def test_generated_title_can_retain_a_sourced_percentage(self):
+        validate_generated_title(
+            "中端模型涨价20%",
+            "AI",
+            "中端模型价格上涨20%",
+        )
 
     def test_published_topic_is_removed_before_selection(self):
         filtered = {

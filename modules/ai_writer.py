@@ -8,7 +8,12 @@ import logging
 from typing import Dict, Optional
 from openai import OpenAI
 
-from modules.content_policy import ContentPolicyError, validate_article, validate_topic
+from modules.content_policy import (
+    ContentPolicyError,
+    validate_article,
+    validate_generated_title,
+    validate_topic,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +113,10 @@ class AIWriter:
         # 去掉可能的前缀序号
         title = title.lstrip("1234567890.、) ")
         try:
-            validate_topic(title, category)
+            validate_generated_title(title, category, hot_title)
         except ContentPolicyError:
-            title = f"{hot_title[:16]}：技术逻辑与行业影响"
-            validate_topic(title, category)
+            title = hot_title[:30].strip("，。！？!?：: ")
+            validate_generated_title(title, category, hot_title)
             logger.warning("生成标题未通过边界检查，已改用保守标题: %s", title)
         logger.info(f"生成标题: {title}")
         return title
