@@ -57,14 +57,21 @@ try {
     waitUntil: 'domcontentloaded',
     timeout: 30000,
   });
+  await page.waitForTimeout(3000);
 
-  if (!page.url().includes('/profile_v4')) {
+  if (!await isCreatorDashboard(page)) {
     console.log('\n请在打开的浏览器中使用今日头条 App 扫码登录。');
     console.log('登录成功后脚本会自动继续，最长等待 5 分钟。');
-    await page.waitForURL(
-      url => url.toString().includes('/profile_v4') && !url.toString().includes('/auth/'),
-      { timeout: 300000 },
-    );
+    const deadline = Date.now() + 300000;
+    let loggedIn = false;
+    while (Date.now() < deadline) {
+      await page.waitForTimeout(1000);
+      if (await isCreatorDashboard(page)) {
+        loggedIn = true;
+        break;
+      }
+    }
+    if (!loggedIn) throw new Error('等待扫码登录超时。');
   }
 
   await page.waitForLoadState('domcontentloaded').catch(() => {});
@@ -124,4 +131,12 @@ try {
   console.error('\n❌ 提取失败:', err.message);
   if (context) await context.close().catch(() => {});
   process.exit(1);
+}
+
+async function isCreatorDashboard(page) {
+  const url = page.url();
+  if (!url.includes('/profile_v4') || url.includes('/auth/')) return false;
+  return page.locator(
+    '[class*="sidebar"], [class*="sider"], a[href*="graphic/publish"]'
+  ).first().isVisible({ timeout: 2000 }).catch(() => false);
 }

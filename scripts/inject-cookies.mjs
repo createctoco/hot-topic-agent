@@ -10,6 +10,7 @@
  * 环境变量：
  *   COOKIES_FILE - Cookie 文件路径（默认 data/auth/cookies.json）
  *   TOUTIAO_ACCOUNT - 账号名（默认 default）
+ *   TOUTIAO_PROFILE_DIR - 浏览器会话目录（可选）
  */
 import { chromium } from 'playwright';
 import { homedir } from 'os';
@@ -18,8 +19,19 @@ import { mkdirSync, readFileSync, existsSync } from 'fs';
 
 const PROJECT_ROOT = process.cwd();
 const account = process.env.TOUTIAO_ACCOUNT || 'default';
-const userDataDir = join(homedir(), '.toutiao-ops', 'accounts', account, 'browser-data');
+const userDataDir = process.env.TOUTIAO_PROFILE_DIR ||
+  join(homedir(), '.toutiao-ops', 'accounts', account, 'browser-data');
 const cookiesFile = resolve(process.env.COOKIES_FILE || join(PROJECT_ROOT, 'data', 'auth', 'cookies.json'));
+const browserCandidates = process.platform === 'win32'
+  ? [
+      process.env.TOUTIAO_BROWSER_EXECUTABLE,
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    ]
+  : [process.env.TOUTIAO_BROWSER_EXECUTABLE];
+const executablePath = browserCandidates.find(path => path && existsSync(path));
 
 console.log('正在注入 Cookie 到浏览器会话...');
 console.log(`  Cookie 文件: ${cookiesFile}`);
@@ -55,6 +67,7 @@ try {
   // 启动持久化浏览器上下文（与 toutiao-ops 使用相同的 userDataDir）
   browser = await chromium.launchPersistentContext(userDataDir, {
     headless: true,
+    ...(executablePath ? { executablePath } : {}),
     viewport: { width: 1440, height: 900 },
     locale: 'zh-CN',
     timezoneId: 'Asia/Shanghai',
@@ -84,13 +97,32 @@ try {
     }, localStorageData);
   }
 
+  // A successful write is not enough: verify that the restored session can
+  // actually reach the creator dashboard before reporting success.
+  await page.goto('https://mp.toutiao.com/', {
+    waitUntil: 'domcontentloaded',
+    timeout: 30000,
+  });
+  await page.waitForTimeout(2000);
+  const currentUrl = page.url();
+  const dashboardVisible = await page.locator(
+    '[class*="sidebar"], [class*="sider"], a[href*="graphic/publish"]'
+  ).first().isVisible({ timeout: 5000 }).catch(() => false);
+  const loggedIn = (
+    currentUrl.includes('/profile_v4') &&
+    !currentUrl.includes('/auth/')
+  ) || dashboardVisible;
+  if (!loggedIn) {
+    throw new Error(`Cookie session is not logged in. Current URL: ${currentUrl}`);
+  }
+
   await browser.close();
 
   console.log(`\n✅ 注入成功！`);
   console.log(`   Cookie 数量: ${cookies.length}`);
   console.log(`   localStorage 项: ${Object.keys(localStorageData).length}`);
   console.log(`   浏览器会话已保存到: ${userDataDir}`);
-  console.log(`\n下一步：运行 npx @openclaw-cn/toutiao-ops auth check --headless 验证登录状态`);
+  console.log(`   登录状态: 已验证`);
 } catch (err) {
   console.error('\n❌ 注入失败:', err.message);
   if (browser) await browser.close().catch(() => {});
