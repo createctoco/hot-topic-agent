@@ -172,6 +172,16 @@ def filter_items(items: List[Dict]) -> Dict[str, List[Dict]]:
     return result
 
 
+def exclude_published_topics(
+    filtered: Dict[str, List[Dict]], published_titles: set[str]
+) -> Dict[str, List[Dict]]:
+    """Remove previously published source topics before quota selection."""
+    return {
+        category: [item for item in items if item.get("title") not in published_titles]
+        for category, items in filtered.items()
+    }
+
+
 def select_topics(filtered: Dict[str, List[Dict]], count: int = 10) -> List[Dict]:
     """
     从过滤后的热搜中选取要发布的选题

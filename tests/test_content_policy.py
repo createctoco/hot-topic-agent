@@ -1,6 +1,7 @@
 import unittest
 
 from modules.content_policy import ContentPolicyError, validate_article, validate_topic
+from modules.keyword_filter import exclude_published_topics, select_topics
 
 
 class ContentPolicyTests(unittest.TestCase):
@@ -20,6 +21,20 @@ class ContentPolicyTests(unittest.TestCase):
     def test_rejects_short_or_empty_article(self):
         with self.assertRaises(ContentPolicyError):
             validate_article("AI客服如何降低响应时间", "内容很短。", "AI")
+
+    def test_published_topic_is_removed_before_selection(self):
+        filtered = {
+            "跨境电商": [],
+            "外贸": [],
+            "AI": [
+                {"title": "已发布话题", "category": "AI", "platform": "test"},
+                {"title": "新的安全话题", "category": "AI", "platform": "test"},
+            ],
+            "科技": [],
+        }
+        eligible = exclude_published_topics(filtered, {"已发布话题"})
+        selected = select_topics(eligible, 1)
+        self.assertEqual([item["title"] for item in selected], ["新的安全话题"])
 
 
 if __name__ == "__main__":

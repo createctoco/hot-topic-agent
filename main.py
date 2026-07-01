@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from modules.hot_search import fetch_all
-from modules.keyword_filter import filter_items, select_topics
+from modules.keyword_filter import exclude_published_topics, filter_items, select_topics
 from modules.ai_writer import AIWriter
 from modules.publisher import ToutiaoPublisher
 
@@ -105,6 +105,14 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
     filtered = filter_items(items)
     stats["filtered"] = {k: len(v) for k, v in filtered.items()}
 
+    history = load_published_history()
+    published_titles = {
+        h.get("source_topic", "")
+        for h in history
+        if h.get("success") is True and not h.get("dry_run")
+    }
+    filtered = exclude_published_topics(filtered, published_titles)
+
     # ============ 3. 选题 ============
     logger.info("=" * 50)
     logger.info(f"第3步：选取 {count} 个选题")
@@ -148,14 +156,6 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
             return stats
         else:
             logger.info("Toutiao login session is valid.")
-
-    # 加载历史记录（避免重复发布）
-    history = load_published_history()
-    published_titles = {
-        h.get("source_topic", "")
-        for h in history
-        if h.get("success") is True and not h.get("dry_run")
-    }
 
     # 逐个生成并发布
     for i, topic in enumerate(selected, 1):
