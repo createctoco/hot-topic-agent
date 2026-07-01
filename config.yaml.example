@@ -15,7 +15,8 @@ deepseek:
 # 发布配置
 publish:
   first_publish: true      # 声明头条首发
-  ai_declared: true        # 声明AI生成内容
+  network_sourced: true    # 声明内容取材网络
+  ai_declared: true        # AI参与时保留平台要求的披露
   interval_seconds: 90     # 每篇发布间隔（秒）
 
 # 热搜采集配置

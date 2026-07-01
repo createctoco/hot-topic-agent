@@ -173,6 +173,7 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
                 hot_title=topic["title"],
                 category=topic["category"],
                 platform=topic.get("platform", ""),
+                source_url=topic.get("url", ""),
             )
 
             # 保存文章到文件
@@ -192,6 +193,7 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
                     category=article["category"],
                     first_publish=publish_config.get("first_publish", True),
                     ai_declared=publish_config.get("ai_declared", True),
+                    network_sourced=publish_config.get("network_sourced", True),
                     cover_keyword=cover_keyword,
                 )
 

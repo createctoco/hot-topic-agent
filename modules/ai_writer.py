@@ -8,6 +8,8 @@ import logging
 from typing import Dict, Optional
 from openai import OpenAI
 
+from modules.content_policy import validate_article, validate_topic
+
 logger = logging.getLogger(__name__)
 
 # 领域写作风格
@@ -76,6 +78,7 @@ class AIWriter:
         """
         根据热搜关键词生成文章标题
         """
+        validate_topic(hot_title, category)
         style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["科技"])
 
         prompt = f"""你是今日头条的{style['perspective']}，请根据以下热搜关键词，生成一个吸引人的文章标题。
@@ -89,6 +92,8 @@ class AIWriter:
 3. 不要标题党，不要夸张
 4. 不要用感叹号
 5. 只返回标题本身，不要引号、不要序号、不要其他内容
+6. 只讨论科技、AI、外贸或跨境电商业务，不涉及政治、军事、政治人物或国家评价
+7. 不使用攻击、贬损、煽动或未经证实的指控
 
 生成标题："""
 
@@ -105,11 +110,18 @@ class AIWriter:
         logger.info(f"生成标题: {title}")
         return title
 
-    def generate_article(self, hot_title: str, category: str, platform: str = "") -> Dict:
+    def generate_article(
+        self,
+        hot_title: str,
+        category: str,
+        platform: str = "",
+        source_url: str = "",
+    ) -> Dict:
         """
         根据热搜关键词生成完整文章
         返回: {"title": str, "content": str, "category": str}
         """
+        validate_topic(hot_title, category)
         style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["科技"])
 
         # 先生成标题
@@ -119,6 +131,7 @@ class AIWriter:
         content_prompt = f"""你是今日头条的{style['perspective']}，请围绕以下热搜话题，写一篇深度文章。
 
 热搜话题：{hot_title}（来源：{platform}）
+来源链接：{source_url or '未提供'}
 领域：{category}
 写作风格：{style['tone']}
 重点关注：{style['focus']}
@@ -127,11 +140,15 @@ class AIWriter:
 1. 字数2000-3000字
 2. 结构清晰，使用小标题分段
 3. 开头要吸引人，用一段话引出话题
-4. 中间要有数据、案例、分析
+4. 提供具体、可执行的信息；不得编造数据、案例、引语、认证或调查结论
 5. 结尾要有观点总结和展望
 6. 语言要通俗易懂，避免过于学术
 7. 不要写"编者按""导语"等元信息
 8. 直接写正文内容
+9. 内容只限科技、AI、外贸、跨境电商，不讨论政治、军事、政治人物或国际冲突
+10. 不贬损中国或任何国家、地区和群体，不使用煽动性、对立性表达
+11. 遇到无法从题目和来源确认的事实，删除该事实，不猜测、不补造
+12. 每段表达一个明确观点，给出原因、影响或操作建议，避免套话和空泛结论
 
 文章内容："""
 
@@ -141,7 +158,14 @@ class AIWriter:
         ]
 
         logger.info(f"正在生成文章: [{category}] {title}")
-        content = self._call_api(messages, max_tokens=4096, temperature=0.85)
+        content = self._call_api(messages, max_tokens=4096, temperature=0.65)
+        content = self._review_and_rewrite(
+            title=title,
+            content=content,
+            hot_title=hot_title,
+            category=category,
+        )
+        validate_article(title, content, category)
 
         # 将正文转为适合头条发布的HTML格式
         html_content = self._format_to_html(title, content, category)
@@ -152,11 +176,46 @@ class AIWriter:
             "raw_content": content,
             "category": category,
             "source_topic": hot_title,
+            "source_url": source_url,
             "image_keywords": self._generate_image_keywords(hot_title, category),
         }
 
         logger.info(f"文章生成完成: {title} ({len(content)}字)")
         return result
+
+    def _review_and_rewrite(self, title: str, content: str, hot_title: str, category: str) -> str:
+        """Run a low-temperature editorial pass before deterministic validation."""
+        prompt = f"""你是严格的中文科技商业编辑。请审校并重写下面的文章，直接输出修订后的正文。
+
+标题：{title}
+原始话题：{hot_title}
+领域：{category}
+
+硬性要求：
+1. 只保留科技、AI、外贸或跨境电商相关内容。
+2. 删除政治、军事、政治人物、国际冲突、国家对立和贬损中国或其他国家群体的内容。
+3. 修复病句、歧义、搭配错误、指代不清、前后矛盾和不完整句子。
+4. 删除空洞套话、重复段落和模糊观点；每段必须提供明确事实边界、原因、影响或可执行建议。
+5. 不得编造数据、案例、引语、来源、认证或结论。无法确认的内容直接删除。
+6. 保持约1800至3000个中文字符，使用清晰的小标题和自然段。
+7. 不输出审校说明、评分、Markdown代码围栏或“作为AI”等元信息。
+
+待审文章：
+{content}
+"""
+        messages = [
+            {
+                "role": "system",
+                "content": "你负责中文商业科技内容的事实边界、语法、逻辑和信息密度审校。",
+            },
+            {"role": "user", "content": prompt},
+        ]
+        reviewed = self._call_api(messages, max_tokens=4096, temperature=0.2).strip()
+        if reviewed.startswith("```"):
+            reviewed = reviewed.strip("`")
+            reviewed = reviewed.removeprefix("markdown").strip()
+        logger.info("文章二次审校完成: %s (%s字)", title, len(reviewed))
+        return reviewed
 
     def _generate_image_keywords(self, hot_title: str, category: str) -> list:
         """让AI生成3个配图关键词（中文，适配头条免费图库）"""

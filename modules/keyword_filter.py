@@ -6,6 +6,8 @@ import re
 import logging
 from typing import List, Dict
 
+from modules.content_policy import ContentPolicyError, validate_topic
+
 logger = logging.getLogger(__name__)
 
 # 四大领域关键词库（大幅扩充，提高匹配率）
@@ -129,6 +131,10 @@ def match_category(title: str) -> str:
         priority = ["跨境电商", "外贸", "AI", "科技"]
         for cat in priority:
             if cat in matched_categories:
+                try:
+                    validate_topic(title, cat)
+                except ContentPolicyError:
+                    return None
                 return cat
 
     return None

@@ -180,6 +180,7 @@ class ToutiaoPublisher:
         category: str = "",
         first_publish: bool = True,
         ai_declared: bool = True,
+        network_sourced: bool = True,
         cover_keyword: str = "",
     ) -> dict[str, Any]:
         opts = self._get_supported_options()
@@ -229,8 +230,13 @@ class ToutiaoPublisher:
 
             if first_publish and "first-publish" in opts:
                 args.append("--first-publish")
-            if ai_declared and "declaration" in opts:
-                args += ["--declaration", "引用AI"]
+            declarations = []
+            if network_sourced:
+                declarations.append("取材网络")
+            if ai_declared:
+                declarations.append("引用AI")
+            if declarations and "declaration" in opts:
+                args += ["--declaration", ",".join(declarations)]
             if (os.environ.get("NON_INTERACTIVE") or os.environ.get("CI")) and "headless" in opts:
                 args.append("--headless")
 
