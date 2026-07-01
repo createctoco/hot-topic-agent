@@ -171,7 +171,12 @@ class AIWriter:
             hot_title=hot_title,
             category=category,
         )
-        validate_article(title, content, category)
+        content = self._enforce_policy_with_rewrite(
+            title=title,
+            content=content,
+            hot_title=hot_title,
+            category=category,
+        )
 
         # 将正文转为适合头条发布的HTML格式
         html_content = self._format_to_html(title, content, category)
@@ -224,6 +229,71 @@ class AIWriter:
             reviewed = reviewed.removeprefix("markdown").strip()
         logger.info("文章二次审校完成: %s (%s字)", title, len(reviewed))
         return reviewed
+
+    def _enforce_policy_with_rewrite(
+        self,
+        title: str,
+        content: str,
+        hot_title: str,
+        category: str,
+    ) -> str:
+        """Automatically repair one policy failure before rejecting a topic."""
+        try:
+            validate_article(title, content, category)
+            return content
+        except ContentPolicyError as error:
+            logger.warning("初次质量检查未通过，启动自动安全重写: %s", error)
+            rewritten = self._safe_rewrite(
+                title=title,
+                content=content,
+                hot_title=hot_title,
+                category=category,
+                rejection_reason=str(error),
+            )
+            validate_article(title, rewritten, category)
+            logger.info("自动安全重写通过质量检查: %s (%s字)", title, len(rewritten))
+            return rewritten
+
+    def _safe_rewrite(
+        self,
+        title: str,
+        content: str,
+        hot_title: str,
+        category: str,
+        rejection_reason: str,
+    ) -> str:
+        """Rewrite rejected copy into evergreen, source-bounded business content."""
+        prompt = f"""你是中文科技商业稿件的终审编辑。下面文章未通过自动检查，请重写整篇正文。
+
+标题：{title}
+原始话题：{hot_title}
+领域：{category}
+自动检查拒绝原因：{rejection_reason}
+
+必须执行：
+1. 删除所有政治、政府、政党、选举、外交、制裁、军事、战争、战场、武器、政治人物、国际冲突和国家对立内容；比喻用法也要删除。
+2. 删除无法由输入标题直接支持的年份、比例、人数、金额、报告、统计、调查、爆料、引语、内部消息和企业已实施行为。
+3. 不补造新闻细节。改写为技术原理、行业通用机制、风险识别步骤和可执行建议。
+4. 只聚焦科技、AI、外贸或跨境电商，不评价中国或任何国家、地区和群体。
+5. 修复病句、歧义、指代不清、前后矛盾和不完整句子；删除套话、重复和模糊观点。
+6. 保留8个以上自然段或小标题、18个以上完整句子，总长度约1800至3000个中文字符。
+7. 不输出说明、评分、引用列表、代码围栏或“作为AI”等元信息，只输出修订后的正文。
+
+待重写正文：
+{content}
+"""
+        messages = [
+            {
+                "role": "system",
+                "content": "你只做保守、可验证、无敏感议题的中文科技商业稿件终审。",
+            },
+            {"role": "user", "content": prompt},
+        ]
+        rewritten = self._call_api(messages, max_tokens=4096, temperature=0.1).strip()
+        if rewritten.startswith("```"):
+            rewritten = rewritten.strip("`")
+            rewritten = rewritten.removeprefix("markdown").strip()
+        return rewritten
 
     def _generate_image_keywords(self, hot_title: str, category: str) -> list:
         """让AI生成3个配图关键词（中文，适配头条免费图库）"""
