@@ -18,6 +18,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from modules.hot_search import fetch_all
 from modules.keyword_filter import exclude_published_topics, filter_items, select_topics
 from modules.ai_writer import AIWriter
+from modules.content_policy import ContentPolicyError
 from modules.publisher import ToutiaoPublisher
 
 # 日志配置
@@ -81,6 +82,7 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
         "generated": 0,
         "published": 0,
         "failed": 0,
+        "rejected": 0,
         "articles": [],
     }
 
@@ -117,7 +119,8 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
     logger.info("=" * 50)
     logger.info(f"第3步：选取 {count} 个选题")
     logger.info("=" * 50)
-    selected = select_topics(filtered, count)
+    candidate_limit = max(count, min(count * 3, count + 4))
+    selected = select_topics(filtered, candidate_limit)
 
     if not selected:
         logger.warning("没有匹配的选题，跳过本轮")
@@ -229,12 +232,20 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
                 "success": dry_run or result["success"],
             })
 
+            completed = stats["generated"] if dry_run else stats["published"]
+            if completed >= count:
+                break
+
             # 间隔等待，避免发布太快
             if i < len(selected):
                 wait_time = config.get("publish", {}).get("interval_seconds", 60)
                 logger.info(f"  等待 {wait_time} 秒后继续...")
                 time.sleep(wait_time)
 
+        except ContentPolicyError as e:
+            logger.warning("  稿件未通过内容边界或质量检查: %s", e)
+            stats["rejected"] += 1
+            continue
         except Exception as e:
             logger.error(f"  ❌ 处理失败: {e}")
             stats["failed"] += 1
@@ -245,6 +256,12 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
                 logger.error("Stopping this run because the AI API credentials are invalid.")
                 break
             continue
+
+    completed = stats["generated"] if dry_run else stats["published"]
+    if completed < count and not stats.get("error"):
+        stats["failed"] = max(stats["failed"], count - completed)
+        stats["error"] = "not_enough_qualified_articles"
+        logger.error("No qualified article was produced after checking %s candidates.", len(selected))
 
     stats["end_time"] = datetime.now().isoformat()
     return stats
@@ -307,6 +324,7 @@ def main():
         print(f"  生成文章: {stats['generated']} 篇")
         print(f"  发布成功: {stats['published']} 篇")
         print(f"  发布失败: {stats['failed']} 篇")
+        print(f"  质量拒绝: {stats.get('rejected', 0)} 篇")
         if stats.get("failed", 0) > 0 or stats.get("error"):
             logger.error("Run completed with failures; returning a non-zero exit code.")
             raise SystemExit(1)

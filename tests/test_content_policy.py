@@ -24,6 +24,11 @@ class ContentPolicyTests(unittest.TestCase):
                 with self.assertRaises(ContentPolicyError):
                     validate_topic(title, "AI")
 
+    def test_entertainment_event_does_not_enter_technology(self):
+        from modules.keyword_filter import match_category
+
+        self.assertIsNone(match_category("霉霉婚礼禁用手机"))
+
     def test_rejects_short_or_empty_article(self):
         with self.assertRaises(ContentPolicyError):
             validate_article("AI客服如何降低响应时间", "内容很短。", "AI")
