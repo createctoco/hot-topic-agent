@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Optional
 from openai import OpenAI
 
-from modules.content_policy import validate_article, validate_topic
+from modules.content_policy import ContentPolicyError, validate_article, validate_topic
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +107,12 @@ class AIWriter:
         title = title.strip().strip('"').strip("'").strip("《》").strip("【】")
         # 去掉可能的前缀序号
         title = title.lstrip("1234567890.、) ")
+        try:
+            validate_topic(title, category)
+        except ContentPolicyError:
+            title = f"{hot_title[:16]}：技术逻辑与行业影响"
+            validate_topic(title, category)
+            logger.warning("生成标题未通过边界检查，已改用保守标题: %s", title)
         logger.info(f"生成标题: {title}")
         return title
 
@@ -196,9 +202,11 @@ class AIWriter:
 2. 删除政治、军事、政治人物、国际冲突、国家对立和贬损中国或其他国家群体的内容。
 3. 修复病句、歧义、搭配错误、指代不清、前后矛盾和不完整句子。
 4. 删除空洞套话、重复段落和模糊观点；每段必须提供明确事实边界、原因、影响或可执行建议。
-5. 不得编造数据、案例、引语、来源、认证或结论。无法确认的内容直接删除。
-6. 保持约1800至3000个中文字符，使用清晰的小标题和自然段。
-7. 不输出审校说明、评分、Markdown代码围栏或“作为AI”等元信息。
+5. 输入材料只有话题标题，不足以支持新闻事实。不得添加年份、比例、人数、报告、爆料、调查、引语或真实企业已经实施某项行为的断言。
+6. 不得把推测写成事实。只能写概念解释、通用机制、风险识别方法和不依赖特定企业的实用建议。
+7. 保持约1800至3000个中文字符，使用清晰的小标题和自然段。
+8. 标题和正文不得使用“惊现、暗藏玄机、震惊、内幕、伦理拷问、细思极恐”等标题党或文学化表达。
+9. 不输出审校说明、评分、Markdown代码围栏或“作为AI”等元信息。
 
 待审文章：
 {content}

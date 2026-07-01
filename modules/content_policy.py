@@ -29,6 +29,21 @@ EMPTY_CONTENT_MARKERS = [
     "在这个快速发展的时代", "总而言之", "综上所述",
 ]
 
+HYPE_OR_OFF_TOPIC_TERMS = [
+    "惊现", "暗藏玄机", "震惊", "内幕", "伦理拷问", "叶文洁", "细思极恐",
+    "颠覆认知", "终于瞒不住", "万万没想到",
+]
+
+UNSUPPORTED_CLAIM_PATTERNS = [
+    r"20\d{2}年",
+    r"\d+(?:\.\d+)?%",
+    r"(?:超过|高达|达到|多达)\d+",
+    r"\d+(?:\.\d+)?万(?:人|家|个|美元|元)",
+    r"据[^。；]{0,20}(?:报告|统计|数据|研究|调查)",
+    r"(?:员工|内部人士|知情人士)[^。；]{0,20}(?:爆料|透露|表示)",
+    r"(?:有消息称|传出|网传|业内人士表示|公开表示|研究表明|调查显示)",
+]
+
 
 class ContentPolicyError(ValueError):
     pass
@@ -50,6 +65,9 @@ def validate_topic(title: str, category: str) -> None:
     violations = find_boundary_violations(title)
     if violations:
         raise ContentPolicyError("blocked topic: " + "; ".join(violations))
+    hype = [term for term in HYPE_OR_OFF_TOPIC_TERMS if term in title]
+    if hype:
+        raise ContentPolicyError("hype or off-topic title: " + ", ".join(hype))
 
 
 def plain_text(html_or_text: str) -> str:
@@ -87,3 +105,10 @@ def validate_article(title: str, content: str, category: str) -> None:
 
     if any(marker in compact for marker in ("作为一个AI", "作为AI", "我无法", "语言模型")):
         raise ContentPolicyError("article contains model meta-commentary")
+
+    unsupported = [
+        pattern for pattern in UNSUPPORTED_CLAIM_PATTERNS
+        if re.search(pattern, compact)
+    ]
+    if unsupported:
+        raise ContentPolicyError("article contains unsupported factual claims")

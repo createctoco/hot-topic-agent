@@ -18,9 +18,21 @@ class ContentPolicyTests(unittest.TestCase):
         with self.assertRaises(ContentPolicyError):
             validate_topic("所谓中国崩溃论影响跨境卖家", "跨境电商")
 
+    def test_blocks_hype_and_fictional_hooks(self):
+        for title in ("AI行业惊现新内幕", "硅谷叶文洁出现了"):
+            with self.subTest(title=title):
+                with self.assertRaises(ContentPolicyError):
+                    validate_topic(title, "AI")
+
     def test_rejects_short_or_empty_article(self):
         with self.assertRaises(ContentPolicyError):
             validate_article("AI客服如何降低响应时间", "内容很短。", "AI")
+
+    def test_rejects_unsupported_report_claims(self):
+        paragraphs = [f"第{i}部分说明一个完整且不同的业务流程，并给出可执行检查步骤。" for i in range(25)]
+        content = "\n".join(paragraphs) + "\n据行业报告，2024年相关企业增长超过30%。"
+        with self.assertRaises(ContentPolicyError):
+            validate_article("AI客服如何降低响应时间", content, "AI")
 
     def test_published_topic_is_removed_before_selection(self):
         filtered = {
