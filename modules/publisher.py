@@ -209,6 +209,10 @@ class ToutiaoPublisher:
                 args += ["--cover", str(Path(cover_path).resolve())]
                 if "cover-mode" in opts:
                     args += ["--cover-mode", "single"]
+            elif "cover-mode" in opts:
+                # Toutiao removed the free-library tab from some publisher UI
+                # variants. No-cover mode is the only deterministic fallback.
+                args += ["--cover-mode", "none"]
             elif "cover-free" in opts:
                 args.append("--cover-free")
                 if "cover-keyword" in opts:

@@ -71,6 +71,22 @@ class PublisherTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["url"], "https://mp.toutiao.com/content")
 
+    def test_uses_no_cover_when_no_real_cover_is_configured(self):
+        publisher = self.make_publisher()
+        publisher._supported_opts.add("cover-mode")
+        fake = {
+            "success": True,
+            "output": '{"success":true,"action":"published"}',
+            "data": {"success": True, "action": "published"},
+        }
+        with patch.object(publisher, "_run_toutiao_cmd", return_value=fake) as runner:
+            result = publisher.publish_article("A valid title", "<p>body</p>")
+        args = runner.call_args.args[0]
+        self.assertTrue(result["success"])
+        self.assertIn("--cover-mode", args)
+        self.assertEqual(args[args.index("--cover-mode") + 1], "none")
+        self.assertNotIn("--cover-free", args)
+
 
 if __name__ == "__main__":
     unittest.main()
