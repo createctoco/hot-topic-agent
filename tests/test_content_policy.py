@@ -39,6 +39,11 @@ class ContentPolicyTests(unittest.TestCase):
         with self.assertRaises(ContentPolicyError):
             validate_article("AI客服如何降低响应时间", content, "AI")
 
+    def test_rejects_unsupported_numeric_ranges(self):
+        paragraphs = [f"第{i}部分说明企业未来3至5年的技术规划和通用方法。" for i in range(25)]
+        with self.assertRaises(ContentPolicyError):
+            validate_article("人工智能应用方法", "\n".join(paragraphs), "AI")
+
     def test_published_topic_is_removed_before_selection(self):
         filtered = {
             "跨境电商": [],
