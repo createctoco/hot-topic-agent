@@ -72,14 +72,14 @@ def validate_topic(title: str, category: str) -> None:
         raise ContentPolicyError("hype or off-topic title: " + ", ".join(hype))
 
 
-def validate_generated_title(title: str, category: str, source_title: str) -> None:
+def validate_generated_title(title: str, category: str, source_evidence: str) -> None:
     """Reject factual claims introduced by the generated title itself."""
     validate_topic(title, category)
     introduced_claims: list[str] = []
     for pattern in UNSUPPORTED_CLAIM_PATTERNS:
         for match in re.finditer(pattern, title):
             claim = match.group(0)
-            if claim not in source_title:
+            if claim not in re.sub(r"\s+", "", source_evidence or ""):
                 introduced_claims.append(claim)
     if introduced_claims:
         raise ContentPolicyError(
@@ -93,7 +93,7 @@ def plain_text(html_or_text: str) -> str:
     return unescape(text).strip()
 
 
-def validate_article(title: str, content: str, category: str) -> None:
+def validate_article(title: str, content: str, category: str, source_evidence: str = "") -> None:
     validate_topic(title, category)
     text = plain_text(content)
     violations = find_boundary_violations(text)
@@ -124,9 +124,12 @@ def validate_article(title: str, content: str, category: str) -> None:
     if any(marker in compact for marker in ("作为一个AI", "作为AI", "我无法", "语言模型")):
         raise ContentPolicyError("article contains model meta-commentary")
 
-    unsupported = [
-        pattern for pattern in UNSUPPORTED_CLAIM_PATTERNS
-        if re.search(pattern, compact)
-    ]
+    evidence = re.sub(r"\s+", "", source_evidence or "")
+    unsupported: list[str] = []
+    for pattern in UNSUPPORTED_CLAIM_PATTERNS:
+        for match in re.finditer(pattern, compact):
+            if not evidence or match.group(0) not in evidence:
+                unsupported.append(pattern)
+                break
     if unsupported:
         raise ContentPolicyError("article contains unsupported factual claims")

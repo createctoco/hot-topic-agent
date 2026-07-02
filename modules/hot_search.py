@@ -54,6 +54,7 @@ def fetch_baidu() -> List[Dict]:
                     "hot": item.get("hotScore", ""),
                     "url": item.get("url", ""),
                     "raw_query": item.get("query", item.get("word", "")),
+                    "summary": item.get("desc", ""),
                 })
         logger.info(f"百度热搜: 获取到 {len(items)} 条")
         return items
@@ -77,6 +78,7 @@ def fetch_weibo() -> List[Dict]:
                 "hot": item.get("num", ""),
                 "url": f"https://s.weibo.com/weibo?q=%23{item.get('note', '').replace(' ', '%20')}%23",
                 "raw_query": item.get("note", ""),
+                "summary": item.get("word_scheme", ""),
             })
         logger.info(f"微博热搜: 获取到 {len(items)} 条")
         return items
@@ -102,6 +104,7 @@ def fetch_zhihu() -> List[Dict]:
                     "hot": item.get("detail_text", ""),
                     "url": target.get("url", ""),
                     "raw_query": title,
+                    "summary": target.get("excerpt", ""),
                 })
         logger.info(f"知乎热榜: 获取到 {len(items)} 条")
         return items
@@ -125,6 +128,7 @@ def fetch_toutiao() -> List[Dict]:
                     "hot": item.get("HotValue", ""),
                     "url": item.get("Url", ""),
                     "raw_query": title,
+                    "summary": item.get("LabelDesc", ""),
                 })
         logger.info(f"头条热榜: 获取到 {len(items)} 条")
         return items

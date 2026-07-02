@@ -44,6 +44,15 @@ class ContentPolicyTests(unittest.TestCase):
         with self.assertRaises(ContentPolicyError):
             validate_article("AI客服如何降低响应时间", content, "AI")
 
+    def test_accepts_factual_claims_present_in_source_evidence(self):
+        paragraphs = [
+            f"第{i}部分说明一个完整且不同的企业业务流程，并解释这一环节的执行方法。第{i}项核对步骤用于识别输入错误和边界条件。第{i}项执行记录用于后续复盘和持续改进。"
+            for i in range(30)
+        ]
+        content = "\n".join(paragraphs) + "\n来源材料显示，2024年相关业务增长超过30%。"
+        evidence = "公开来源材料显示，2024年相关业务增长超过30%。"
+        validate_article("AI客服如何降低响应时间", content, "AI", evidence)
+
     def test_rejects_unsupported_numeric_ranges(self):
         paragraphs = [f"第{i}部分说明企业未来3至5年的技术规划和通用方法。" for i in range(25)]
         with self.assertRaises(ContentPolicyError):
