@@ -79,7 +79,7 @@ class AIWriter:
                 else:
                     raise
 
-    def generate_title(self, hot_title: str, category: str) -> str:
+    def generate_title(self, hot_title: str, category: str, source_text: str = "") -> str:
         """
         根据热搜关键词生成文章标题
         """
@@ -89,6 +89,7 @@ class AIWriter:
         prompt = f"""你是今日头条的{style['perspective']}，请根据以下热搜关键词，生成一个吸引人的文章标题。
 
 热搜关键词：{hot_title}
+来源正文摘录：{source_text[:3000] or '未能读取来源正文'}
 领域：{category}
 
 要求：
@@ -99,6 +100,7 @@ class AIWriter:
 5. 只返回标题本身，不要引号、不要序号、不要其他内容
 6. 只讨论科技、AI、外贸或跨境电商业务，不涉及政治、军事、政治人物或国家评价
 7. 不使用攻击、贬损、煽动或未经证实的指控
+8. 标题中的数字和具体事实必须能在热搜标题或来源正文中逐字找到
 
 生成标题："""
 
@@ -113,7 +115,7 @@ class AIWriter:
         # 去掉可能的前缀序号
         title = title.lstrip("1234567890.、) ")
         try:
-            validate_generated_title(title, category, hot_title)
+            validate_generated_title(title, category, hot_title + "\n" + source_text)
         except ContentPolicyError:
             title = hot_title[:30].strip("，。！？!?：: ")
             validate_generated_title(title, category, hot_title)
@@ -127,6 +129,7 @@ class AIWriter:
         category: str,
         platform: str = "",
         source_url: str = "",
+        source_text: str = "",
     ) -> Dict:
         """
         根据热搜关键词生成完整文章
@@ -136,13 +139,19 @@ class AIWriter:
         style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["科技"])
 
         # 先生成标题
-        title = self.generate_title(hot_title, category)
+        title = self.generate_title(hot_title, category, source_text)
+
+        source_material = source_text[:8000].strip() or "未能读取来源正文，只能使用热搜标题。"
 
         # 生成正文
         content_prompt = f"""你是今日头条的{style['perspective']}，请围绕以下热搜话题，写一篇深度文章。
 
 热搜话题：{hot_title}（来源：{platform}）
 来源链接：{source_url or '未提供'}
+来源正文材料（只可使用这里明确出现的事实）：
+---
+{source_material}
+---
 领域：{category}
 写作风格：{style['tone']}
 重点关注：{style['focus']}
@@ -158,9 +167,9 @@ class AIWriter:
 8. 直接写正文内容
 9. 内容只限科技、AI、外贸、跨境电商，不讨论政治、军事、政治人物或国际冲突
 10. 不贬损中国或任何国家、地区和群体，不使用煽动性、对立性表达
-11. 遇到无法从题目和来源确认的事实，删除该事实，不猜测、不补造
+11. 遇到无法从热搜标题或来源正文材料确认的事实，删除该事实，不猜测、不补造
 12. 每段表达一个明确观点，给出原因、影响或操作建议，避免套话和空泛结论
-13. 关于具体公司、人物或产品，只能复述热搜标题明确表达的事实；不得推断其动机、内部措施、技术路线、供应链安排或未来计划
+13. 关于具体公司、人物或产品，只能复述热搜标题或来源正文材料明确表达的事实；不得推断其动机、内部措施、技术路线、供应链安排或未来计划
 14. 除热搜标题明确包含的信息外，正文改写为不依赖具体公司的行业通用原理、检查清单和操作方法
 
 文章内容："""
@@ -177,12 +186,14 @@ class AIWriter:
             content=content,
             hot_title=hot_title,
             category=category,
+            source_text=source_text,
         )
         content = self._enforce_policy_with_rewrite(
             title=title,
             content=content,
             hot_title=hot_title,
             category=category,
+            source_text=source_text,
         )
 
         # 将正文转为适合头条发布的HTML格式
@@ -195,26 +206,39 @@ class AIWriter:
             "category": category,
             "source_topic": hot_title,
             "source_url": source_url,
+            "source_text": source_text[:8000],
+            "source_text_length": len(source_text),
             "image_keywords": self._generate_image_keywords(hot_title, category),
         }
 
         logger.info(f"文章生成完成: {title} ({len(content)}字)")
         return result
 
-    def _review_and_rewrite(self, title: str, content: str, hot_title: str, category: str) -> str:
+    def _review_and_rewrite(
+        self,
+        title: str,
+        content: str,
+        hot_title: str,
+        category: str,
+        source_text: str = "",
+    ) -> str:
         """Run a low-temperature editorial pass before deterministic validation."""
         prompt = f"""你是严格的中文科技商业编辑。请审校并重写下面的文章，直接输出修订后的正文。
 
 标题：{title}
 原始话题：{hot_title}
 领域：{category}
+可用来源正文：
+---
+{source_text[:8000] or '无来源正文'}
+---
 
 硬性要求：
 1. 只保留科技、AI、外贸或跨境电商相关内容。
 2. 删除政治、军事、政治人物、国际冲突、国家对立和贬损中国或其他国家群体的内容。
 3. 修复病句、歧义、搭配错误、指代不清、前后矛盾和不完整句子。
 4. 删除空洞套话、重复段落和模糊观点；每段必须提供明确事实边界、原因、影响或可执行建议。
-5. 输入材料只有话题标题，不足以支持新闻事实。不得添加年份、比例、人数、报告、爆料、调查、引语或真实企业已经实施某项行为的断言。
+5. 年份、比例、人数、报告、调查、引语和企业行为等具体事实，必须能在可用来源正文或原始话题中逐字找到；找不到就删除。
 6. 不得把推测写成事实。只能写概念解释、通用机制、风险识别方法和不依赖特定企业的实用建议。
 7. 保持约1800至3000个中文字符，使用清晰的小标题和自然段。
 8. 标题和正文不得使用“惊现、暗藏玄机、震惊、内幕、伦理拷问、细思极恐”等标题党或文学化表达。
@@ -244,10 +268,11 @@ class AIWriter:
         content: str,
         hot_title: str,
         category: str,
+        source_text: str = "",
     ) -> str:
         """Automatically repair one policy failure before rejecting a topic."""
         try:
-            validate_article(title, content, category)
+            validate_article(title, content, category, hot_title + "\n" + source_text)
             return content
         except ContentPolicyError as error:
             logger.warning("初次质量检查未通过，启动自动安全重写: %s", error)
@@ -257,8 +282,9 @@ class AIWriter:
                 hot_title=hot_title,
                 category=category,
                 rejection_reason=str(error),
+                source_text=source_text,
             )
-            validate_article(title, rewritten, category)
+            validate_article(title, rewritten, category, hot_title + "\n" + source_text)
             logger.info("自动安全重写通过质量检查: %s (%s字)", title, len(rewritten))
             return rewritten
 
@@ -269,6 +295,7 @@ class AIWriter:
         hot_title: str,
         category: str,
         rejection_reason: str,
+        source_text: str = "",
     ) -> str:
         """Rewrite rejected copy into evergreen, source-bounded business content."""
         prompt = f"""你是中文科技商业稿件的终审编辑。下面文章未通过自动检查，请重写整篇正文。
@@ -277,10 +304,14 @@ class AIWriter:
 原始话题：{hot_title}
 领域：{category}
 自动检查拒绝原因：{rejection_reason}
+允许引用的来源正文：
+---
+{source_text[:8000] or '无来源正文'}
+---
 
 必须执行：
 1. 删除所有政治、政府、政党、选举、外交、制裁、军事、战争、战场、武器、政治人物、国际冲突和国家对立内容；比喻用法也要删除。
-2. 删除无法由输入标题直接支持的年份、比例、人数、金额、报告、统计、调查、爆料、引语、内部消息和企业已实施行为。
+2. 删除无法由输入标题或允许引用的来源正文支持的年份、比例、人数、金额、报告、统计、调查、爆料、引语、内部消息和企业已实施行为。
 3. 不补造新闻细节。改写为技术原理、行业通用机制、风险识别步骤和可执行建议。
 4. 只聚焦科技、AI、外贸或跨境电商，不评价中国或任何国家、地区和群体。
 5. 修复病句、歧义、指代不清、前后矛盾和不完整句子；删除套话、重复和模糊观点。

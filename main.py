@@ -18,6 +18,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from modules.hot_search import fetch_all
 from modules.keyword_filter import exclude_published_topics, filter_items, select_topics
 from modules.ai_writer import AIWriter
+from modules.source_reader import fetch_source
 from modules.content_policy import ContentPolicyError
 from modules.publisher import ToutiaoPublisher
 
@@ -171,13 +172,40 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
             continue
 
         try:
+            source = fetch_source(topic.get("url", ""))
+            fetched_text = source.get("text", "") if source.get("status") == "ok" else ""
+            source_parts = [
+                str(topic.get("summary") or "").strip(),
+                str(fetched_text or "").strip(),
+            ]
+            source_text = "\n".join(part for part in source_parts if part)[:8000]
+            source_url = (
+                source.get("final_url")
+                if source.get("status") == "ok"
+                else topic.get("url", "")
+            )
+            logger.info(
+                "来源材料: status=%s, chars=%s, url=%s",
+                source.get("status"),
+                len(source_text),
+                source.get("final_url") or topic.get("url", ""),
+            )
+
             # AI 生成文章
             article = writer.generate_article(
                 hot_title=topic["title"],
                 category=topic["category"],
                 platform=topic.get("platform", ""),
-                source_url=topic.get("url", ""),
+                source_url=source_url,
+                source_text=source_text,
             )
+            article["source_fetch"] = {
+                "status": source.get("status"),
+                "requested_url": source.get("requested_url"),
+                "final_url": source.get("final_url"),
+                "char_count": source.get("char_count"),
+                "error": source.get("error"),
+            }
 
             # 保存文章到文件
             article_dir = PROJECT_ROOT / "data" / "articles"
