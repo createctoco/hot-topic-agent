@@ -198,15 +198,14 @@ async function setCoverMode(page, mode, coverPath, coverKeyword = '') {
       await sleep(1000, 2000);
     }
   } catch (error) {
-    // 封面上传失败，尝试关闭可能残留的侧边栏
-    await page.locator('.byte-drawer-wrapper button:has-text("取消")').first()
-      .click({ timeout: 3000 }).catch(() => {});
-    await page.keyboard.press('Escape').catch(() => {});
-    await sleep(500, 800);
+    await closeCoverPanel(page);
     if (mode === 'free') {
       console.warn(`[free-library] 免费正版图库不可用，自动切换为无封面: ${error.message}`);
       const noCover = page.getByText('无封面', { exact: true }).first();
-      await noCover.click({ timeout: 5000 });
+      // The editor may keep an invisible drawer above the radio group. A
+      // forced click is safe here because the target has already resolved to
+      // the visible no-cover radio label.
+      await noCover.click({ timeout: 5000, force: true });
       await sleep(500, 800);
       return;
     }
@@ -214,6 +213,40 @@ async function setCoverMode(page, mode, coverPath, coverKeyword = '') {
       throw new Error(`Cover selection failed: ${error.message}`);
     }
   }
+}
+
+async function closeCoverPanel(page) {
+  const drawer = page.locator('.byte-drawer-wrapper').last();
+  if (!await drawer.isVisible({ timeout: 500 }).catch(() => false)) return;
+
+  const closeTargets = [
+    '.byte-drawer-wrapper button:has-text("取消")',
+    '.byte-drawer-wrapper [aria-label="关闭"]',
+    '.byte-drawer-wrapper [aria-label="Close"]',
+    '.byte-drawer-wrapper [class*="drawer-close"]',
+    '.byte-drawer-wrapper [class*="close"]',
+  ];
+  for (const selector of closeTargets) {
+    const target = page.locator(selector).first();
+    if (await target.isVisible({ timeout: 300 }).catch(() => false)) {
+      await target.click({ timeout: 1500, force: true }).catch(() => {});
+      await sleep(300, 500);
+      if (!await drawer.isVisible({ timeout: 300 }).catch(() => false)) return;
+    }
+  }
+
+  await page.keyboard.press('Escape').catch(() => {});
+  await sleep(300, 500);
+  if (!await drawer.isVisible({ timeout: 300 }).catch(() => false)) return;
+
+  // Last-resort degradation: disable only the stale cover picker overlay so
+  // the article editor remains usable and can switch to no-cover mode.
+  await page.evaluate(() => {
+    document.querySelectorAll('.byte-drawer-wrapper, .byte-drawer-mask').forEach((element) => {
+      element.style.pointerEvents = 'none';
+      element.style.visibility = 'hidden';
+    });
+  });
 }
 
 async function openCoverPanel(page) {
@@ -273,9 +306,9 @@ async function selectFromFreeLibrary(page, keyword) {
     console.log('[free-library] 正在使用免费图库，关键词:', keyword);
     await sleep(1000, 2000);
     
-    // Different editor variants use "免费图库", "免费正版图库" or
-    // "免费正版图片" for the same licensed-image picker.
-    const freeTab = page.getByText(/免费(?:正版)?(?:图库|图片)/).first();
+    // Different editor variants use "免费图库", "正版图库",
+    // "免费正版图库" or "免费正版图片" for the same picker.
+    const freeTab = page.getByText(/免费图库|(?:免费)?正版(?:图库|图片)/).first();
     await freeTab.waitFor({ state: 'visible', timeout: 10000 });
     await freeTab.click({ timeout: 5000 });
     await sleep(1500, 2500);
