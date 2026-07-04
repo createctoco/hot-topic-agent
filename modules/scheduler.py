@@ -64,7 +64,7 @@ def start_scheduler(config: dict):
     logger.info(f"热搜自动发文系统已启动！")
     logger.info(f"每天发布 {daily_count} 篇文章")
     logger.info(f"发布时间: {', '.join(times)}")
-    logger.info(f"领域: 跨境电商、外贸、AI、科技")
+    logger.info(f"领域: 跨境电商、外贸、AI")
     logger.info(f"{'='*50}\n")
 
     # 立即执行一次（可选）—— 非交互模式跳过

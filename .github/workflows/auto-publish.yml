@@ -85,12 +85,12 @@ jobs:
               - weibo
               - zhihu
               - toutiao
+              - vertical_news
             request_interval: 0.5
           categories:
             - 跨境电商
             - 外贸
             - AI
-            - 科技
           logging:
             level: INFO
             save_days: 30

@@ -26,6 +26,7 @@ hot_search:
     - weibo
     - zhihu
     - toutiao
+    - vertical_news        # AI、外贸、跨境电商垂直新闻 RSS
   request_interval: 0.5    # 请求间隔（秒）
 
 # 关键词领域配置
@@ -33,7 +34,6 @@ categories:
   - 跨境电商
   - 外贸
   - AI
-  - 科技
 
 # 日志配置
 logging:
