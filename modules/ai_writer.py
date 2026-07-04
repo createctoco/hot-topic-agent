@@ -13,6 +13,7 @@ from modules.content_policy import (
     validate_article,
     validate_generated_title,
     validate_topic,
+    sanitize_article_content,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,14 +31,9 @@ CATEGORY_STYLES = {
         "focus": "贸易政策影响、市场变化、接单技巧、风险规避、实战经验",
     },
     "AI": {
-        "perspective": "科技博主/AI应用达人",
+        "perspective": "AI行业观察者/AI应用从业者",
         "tone": "前沿、清晰、通俗易懂",
         "focus": "技术解读、应用场景、行业影响、工具推荐、未来趋势",
-    },
-    "科技": {
-        "perspective": "科技媒体分析师",
-        "tone": "客观、深度、有观点",
-        "focus": "技术突破、产业影响、竞争格局、市场前景、国产化进程",
     },
 }
 
@@ -84,7 +80,7 @@ class AIWriter:
         根据热搜关键词生成文章标题
         """
         validate_topic(hot_title, category)
-        style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["科技"])
+        style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["AI"])
 
         prompt = f"""你是今日头条的{style['perspective']}，请根据以下热搜关键词，生成一个吸引人的文章标题。
 
@@ -98,7 +94,7 @@ class AIWriter:
 3. 不要标题党，不要夸张
 4. 不要用感叹号
 5. 只返回标题本身，不要引号、不要序号、不要其他内容
-6. 只讨论科技、AI、外贸或跨境电商业务，不涉及政治、军事、政治人物或国家评价
+6. 只讨论AI、外贸或跨境电商业务，不涉及泛科技新品、政治、军事、政治人物或国家评价
 7. 不使用攻击、贬损、煽动或未经证实的指控
 8. 标题中的数字和具体事实必须能在热搜标题或来源正文中逐字找到
 
@@ -136,7 +132,7 @@ class AIWriter:
         返回: {"title": str, "content": str, "category": str}
         """
         validate_topic(hot_title, category)
-        style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["科技"])
+        style = CATEGORY_STYLES.get(category, CATEGORY_STYLES["AI"])
 
         # 先生成标题
         title = self.generate_title(hot_title, category, source_text)
@@ -165,7 +161,7 @@ class AIWriter:
 6. 语言要通俗易懂，避免过于学术
 7. 不要写"编者按""导语"等元信息
 8. 直接写正文内容
-9. 内容只限科技、AI、外贸、跨境电商，不讨论政治、军事、政治人物或国际冲突
+9. 内容只限AI、外贸、跨境电商，不讨论泛科技新品、政治、军事、政治人物或国际冲突
 10. 不贬损中国或任何国家、地区和群体，不使用煽动性、对立性表达
 11. 遇到无法从热搜标题或来源正文材料确认的事实，删除该事实，不猜测、不补造
 12. 每段表达一个明确观点，给出原因、影响或操作建议，避免套话和空泛结论
@@ -223,7 +219,7 @@ class AIWriter:
         source_text: str = "",
     ) -> str:
         """Run a low-temperature editorial pass before deterministic validation."""
-        prompt = f"""你是严格的中文科技商业编辑。请审校并重写下面的文章，直接输出修订后的正文。
+        prompt = f"""你是严格的中文AI与外贸商业编辑。请审校并重写下面的文章，直接输出修订后的正文。
 
 标题：{title}
 原始话题：{hot_title}
@@ -234,7 +230,7 @@ class AIWriter:
 ---
 
 硬性要求：
-1. 只保留科技、AI、外贸或跨境电商相关内容。
+1. 只保留AI、外贸或跨境电商相关内容，删除手机、汽车和消费电子等泛科技新闻。
 2. 删除政治、军事、政治人物、国际冲突、国家对立和贬损中国或其他国家群体的内容。
 3. 修复病句、歧义、搭配错误、指代不清、前后矛盾和不完整句子。
 4. 删除空洞套话、重复段落和模糊观点；每段必须提供明确事实边界、原因、影响或可执行建议。
@@ -251,7 +247,7 @@ class AIWriter:
         messages = [
             {
                 "role": "system",
-                "content": "你负责中文商业科技内容的事实边界、语法、逻辑和信息密度审校。",
+                "content": "你负责中文AI与外贸商业内容的事实边界、语法、逻辑和信息密度审校。",
             },
             {"role": "user", "content": prompt},
         ]
@@ -284,9 +280,16 @@ class AIWriter:
                 rejection_reason=str(error),
                 source_text=source_text,
             )
-            validate_article(title, rewritten, category, hot_title + "\n" + source_text)
-            logger.info("自动安全重写通过质量检查: %s (%s字)", title, len(rewritten))
-            return rewritten
+            evidence = hot_title + "\n" + source_text
+            try:
+                validate_article(title, rewritten, category, evidence)
+                logger.info("自动安全重写通过质量检查: %s (%s字)", title, len(rewritten))
+                return rewritten
+            except ContentPolicyError:
+                sanitized = sanitize_article_content(rewritten, evidence)
+                validate_article(title, sanitized, category, evidence)
+                logger.info("确定性安全清洗通过质量检查: %s (%s字)", title, len(sanitized))
+                return sanitized
 
     def _safe_rewrite(
         self,
@@ -298,7 +301,7 @@ class AIWriter:
         source_text: str = "",
     ) -> str:
         """Rewrite rejected copy into evergreen, source-bounded business content."""
-        prompt = f"""你是中文科技商业稿件的终审编辑。下面文章未通过自动检查，请重写整篇正文。
+        prompt = f"""你是中文AI与外贸商业稿件的终审编辑。下面文章未通过自动检查，请重写整篇正文。
 
 标题：{title}
 原始话题：{hot_title}
@@ -313,7 +316,7 @@ class AIWriter:
 1. 删除所有政治、政府、政党、选举、外交、制裁、军事、战争、战场、武器、政治人物、国际冲突和国家对立内容；比喻用法也要删除。
 2. 删除无法由输入标题或允许引用的来源正文支持的年份、比例、人数、金额、报告、统计、调查、爆料、引语、内部消息和企业已实施行为。
 3. 不补造新闻细节。改写为技术原理、行业通用机制、风险识别步骤和可执行建议。
-4. 只聚焦科技、AI、外贸或跨境电商，不评价中国或任何国家、地区和群体。
+4. 只聚焦AI、外贸或跨境电商，不写泛科技新品，不评价中国或任何国家、地区和群体。
 5. 修复病句、歧义、指代不清、前后矛盾和不完整句子；删除套话、重复和模糊观点。
 6. 保留8个以上自然段或小标题、18个以上完整句子，总长度约1800至3000个中文字符。
 7. 不输出说明、评分、引用列表、代码围栏或“作为AI”等元信息，只输出修订后的正文。
@@ -325,7 +328,7 @@ class AIWriter:
         messages = [
             {
                 "role": "system",
-                "content": "你只做保守、可验证、无敏感议题的中文科技商业稿件终审。",
+                "content": "你只做保守、可验证、无敏感议题的中文AI与外贸商业稿件终审。",
             },
             {"role": "user", "content": prompt},
         ]
@@ -373,10 +376,9 @@ class AIWriter:
             defaults = {
                 "跨境电商": ["电商", "外贸", "全球贸易"],
                 "外贸": ["外贸", "出口", "贸易"],
-                "AI": ["人工智能", "科技", "机器人"],
-                "科技": ["科技", "创新", "技术"],
+                "AI": ["人工智能", "大模型", "AI应用"],
             }
-            return defaults.get(category, ["科技", "新闻", "资讯"])[:3]
+            return defaults.get(category, ["人工智能", "外贸", "跨境电商"])[:3]
 
     def _format_to_html(self, title: str, content: str, category: str) -> str:
         """

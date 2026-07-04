@@ -120,7 +120,7 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
     logger.info("=" * 50)
     logger.info(f"第3步：选取 {count} 个选题")
     logger.info("=" * 50)
-    candidate_limit = max(count, min(count * 3, count + 4))
+    candidate_limit = max(count * 8, 8)
     selected = select_topics(filtered, candidate_limit)
 
     if not selected:
@@ -174,8 +174,11 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
         try:
             source = fetch_source(topic.get("url", ""))
             fetched_text = source.get("text", "") if source.get("status") == "ok" else ""
+            source_summary = str(topic.get("summary") or "").strip()
+            if len(source_summary) < 50:
+                source_summary = ""
             source_parts = [
-                str(topic.get("summary") or "").strip(),
+                source_summary,
                 str(fetched_text or "").strip(),
             ]
             source_text = "\n".join(part for part in source_parts if part)[:8000]

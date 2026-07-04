@@ -6,6 +6,10 @@ import requests
 import json
 import time
 import logging
+import re
+from html import unescape
+from urllib.parse import quote
+from xml.etree import ElementTree
 from typing import List, Dict
 from datetime import datetime
 
@@ -37,6 +41,82 @@ PLATFORMS = {
         "url": "https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc",
     },
 }
+
+
+# General hot lists rarely contain enough vertical business news. These queries
+# supplement them without bringing generic consumer-technology news back in.
+VERTICAL_NEWS_QUERIES = {
+    "跨境电商": "跨境电商 OR 跨境卖家 OR 海外仓 OR Amazon卖家 OR TEMU OR TikTok Shop when:3d",
+    "外贸": "外贸 OR 出口订单 OR 海关 OR 进出口 OR 国际贸易 OR 广交会 when:3d",
+    "AI": "人工智能 OR 大模型 OR AI智能体 OR DeepSeek OR ChatGPT when:2d",
+}
+
+
+def _plain_text(value: str) -> str:
+    """Turn the small HTML snippets used by RSS feeds into plain text."""
+    value = re.sub(r"<[^>]+>", " ", value or "")
+    return re.sub(r"\s+", " ", unescape(value)).strip()
+
+
+def _parse_rss(content: bytes, platform: str, category: str, limit: int = 20) -> List[Dict]:
+    """Parse RSS 2.0 items into the same shape as regular hot-list data."""
+    root = ElementTree.fromstring(content)
+    items = []
+    for node in root.findall("./channel/item")[:limit]:
+        title = _plain_text(node.findtext("title", ""))
+        link = (node.findtext("link", "") or "").strip()
+        source = _plain_text(node.findtext("source", ""))
+        if source and title.endswith(f" - {source}"):
+            title = title[: -(len(source) + 3)].strip()
+        if not title or not link:
+            continue
+        items.append({
+            "platform": platform,
+            "title": title,
+            "hot": "",
+            "url": link,
+            "raw_query": title,
+            "summary": _plain_text(node.findtext("description", "")),
+            "published_at": (node.findtext("pubDate", "") or "").strip(),
+            "source_name": source,
+            "hint_category": category,
+        })
+    return items
+
+
+def fetch_vertical_news() -> List[Dict]:
+    """Fetch category-specific news, using Bing only when Google RSS fails."""
+    items = []
+    for category, query in VERTICAL_NEWS_QUERIES.items():
+        google_url = (
+            "https://news.google.com/rss/search?q="
+            f"{quote(query)}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+        )
+        try:
+            resp = requests.get(google_url, headers=HEADERS, timeout=15)
+            resp.raise_for_status()
+            category_items = _parse_rss(resp.content, "Google新闻", category)
+        except Exception as exc:
+            logger.warning("Google新闻RSS获取失败 [%s]: %s", category, exc)
+            category_items = []
+
+        if not category_items:
+            bing_url = (
+                "https://www.bing.com/news/search?q="
+                f"{quote(query.replace(' when:3d', '').replace(' when:2d', ''))}"
+                "&format=rss&setlang=zh-cn"
+            )
+            try:
+                resp = requests.get(bing_url, headers=HEADERS, timeout=15)
+                resp.raise_for_status()
+                category_items = _parse_rss(resp.content, "Bing新闻", category)
+            except Exception as exc:
+                logger.warning("Bing新闻RSS获取失败 [%s]: %s", category, exc)
+
+        logger.info("垂直新闻 [%s]: 获取到 %s 条", category, len(category_items))
+        items.extend(category_items)
+        time.sleep(0.3)
+    return items
 
 
 def fetch_baidu() -> List[Dict]:
@@ -146,7 +226,7 @@ def fetch_all() -> List[Dict]:
     now = datetime.now().isoformat()
 
     # 逐个平台采集，失败不影响其他平台
-    for fetcher in [fetch_baidu, fetch_weibo, fetch_zhihu, fetch_toutiao]:
+    for fetcher in [fetch_baidu, fetch_weibo, fetch_zhihu, fetch_toutiao, fetch_vertical_news]:
         try:
             items = fetcher()
             for item in items:

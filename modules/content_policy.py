@@ -6,12 +6,13 @@ import re
 from html import unescape
 
 
-ALLOWED_CATEGORIES = {"科技", "AI", "外贸", "跨境电商"}
+ALLOWED_CATEGORIES = {"AI", "外贸", "跨境电商"}
 
 BLOCKED_TERMS = {
     "政治": [
         "政治", "政党", "选举", "总统", "总理", "主席", "政府", "外交", "制裁",
-        "贸易战", "关税战", "政治人物",
+        "贸易战", "关税战", "政治人物", "政务", "党委", "共产党", "基层治理",
+        "政治协商", "人大代表", "政协委员",
         "特朗普", "拜登", "普京", "泽连斯基", "习近平",
     ],
     "军事": [
@@ -93,6 +94,36 @@ def plain_text(html_or_text: str) -> str:
     return unescape(text).strip()
 
 
+def find_unsupported_claims(text: str, source_evidence: str = "") -> list[str]:
+    compact = re.sub(r"\s+", "", text or "")
+    evidence = re.sub(r"\s+", "", source_evidence or "")
+    unsupported: list[str] = []
+    for pattern in UNSUPPORTED_CLAIM_PATTERNS:
+        for match in re.finditer(pattern, compact):
+            if not evidence or match.group(0) not in evidence:
+                unsupported.append(pattern)
+                break
+    return unsupported
+
+
+def sanitize_article_content(content: str, source_evidence: str = "") -> str:
+    """Drop complete passages that violate hard boundaries or source rules."""
+    kept: list[str] = []
+    for passage in re.split(r"\n+", content or ""):
+        passage = passage.strip()
+        if not passage:
+            continue
+        compact = re.sub(r"\s+", "", passage)
+        if find_boundary_violations(passage):
+            continue
+        if any(marker in compact for marker in ("作为一个AI", "作为AI", "作为人工智能", "我无法")):
+            continue
+        if find_unsupported_claims(passage, source_evidence):
+            continue
+        kept.append(passage)
+    return "\n".join(kept)
+
+
 def validate_article(title: str, content: str, category: str, source_evidence: str = "") -> None:
     validate_topic(title, category)
     text = plain_text(content)
@@ -121,15 +152,9 @@ def validate_article(title: str, content: str, category: str, source_evidence: s
     if marker_hits > 4:
         raise ContentPolicyError("article contains too many vague filler phrases")
 
-    if any(marker in compact for marker in ("作为一个AI", "作为AI", "我无法", "语言模型")):
+    if any(marker in compact for marker in ("作为一个AI", "作为AI", "作为人工智能", "我无法")):
         raise ContentPolicyError("article contains model meta-commentary")
 
-    evidence = re.sub(r"\s+", "", source_evidence or "")
-    unsupported: list[str] = []
-    for pattern in UNSUPPORTED_CLAIM_PATTERNS:
-        for match in re.finditer(pattern, compact):
-            if not evidence or match.group(0) not in evidence:
-                unsupported.append(pattern)
-                break
+    unsupported = find_unsupported_claims(compact, source_evidence)
     if unsupported:
         raise ContentPolicyError("article contains unsupported factual claims")

@@ -23,6 +23,7 @@ venv/
 
 # Node.js
 node_modules/
+.python-packages/
 .packages/
 
 # 系统

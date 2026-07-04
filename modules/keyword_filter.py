@@ -1,6 +1,6 @@
 """
 关键词过滤模块
-按领域过滤热搜：跨境电商、外贸、AI、科技
+按领域过滤热搜：跨境电商、外贸、AI
 """
 import re
 import logging
@@ -10,91 +10,47 @@ from modules.content_policy import ContentPolicyError, validate_topic
 
 logger = logging.getLogger(__name__)
 
-# 四大领域关键词库（大幅扩充，提高匹配率）
+# 只保留具有明确业务语义的关键词，避免泛科技、体育和娱乐热点误入。
 CATEGORY_KEYWORDS = {
     "跨境电商": [
-        # 平台
         "跨境电商", "跨境", "亚马逊", "Amazon", "独立站", "Shopify", "速卖通", "AliExpress",
-        "虾皮", "Shopee", "Lazada", "TikTok Shop", "TikTok", "TEMU", "SHEIN", "希音",
+        "虾皮", "Shopee", "Lazada", "TikTok Shop", "TEMU", "SHEIN", "希音",
         "海外仓", "跨境支付", "国际物流", "eBay", "Wish", "Ozon", "美客多", "MercadoLibre",
         "跨境卖家", "跨境贸易", "出海", "DTC", "dropshipping", "外贸电商",
-        # 电商通用
-        "电商", "天猫", "京东", "拼多多", "618", "双11", "双12", "双十一", "黑五", "黑五",
-        "快递", "顺丰", "菜鸟", "供应链", "仓储", "物流", "发货", "配送",
-        "直播带货", "直播电商", "内容电商", "社交电商",
-        # 出海相关
-        "出海", "全球化", "海外市场", "海外业务", "国际化", "跨境出海",
+        "跨境出海", "海外电商", "海外市场", "海外业务", "全球开店", "国际站",
     ],
     "外贸": [
-        # 核心词汇
-        "外贸", "出口", "进口", "报关", "关税", "海关", "贸易战", "贸易摩擦",
+        "外贸", "出口", "进口", "报关", "关税", "海关",
         "国际贸易", "FOB", "CIF", "信用证", "提单", "外贸订单",
         "外贸B2B", "阿里巴巴国际站", "中国制造网", "广交会", "进出口",
         "出口退税", "关税壁垒", "贸易协定", "自贸区", "自由贸易",
-        # 经济金融
-        "美联储", "人民币", "汇率", "外汇", "GDP", "经济数据", "经济增长",
-        "贸易顺差", "贸易逆差", "一带一路", "RCEP", "东盟", "欧盟",
-        "进出口额", "外贸进出口", "外贸企业", "外贸人", "外贸业务",
-        # 政策相关
-        "加征关税", "关税加征", "贸易制裁", "反倾销", "反补贴",
-        "人民币汇率", "美元", "欧元", "日元", "汇率波动",
+        "贸易顺差", "贸易逆差", "RCEP", "进出口额", "外贸进出口",
+        "外贸企业", "外贸人", "外贸业务", "国际结算", "出口订单", "海外订单",
+        "反倾销", "反补贴", "人民币汇率", "汇率波动",
         "外贸政策", "进出口政策", "外贸新规",
     ],
     "AI": [
-        # 通用AI词汇
-        "AI", "人工智能", "智能", "大模型", "LLM", "大语言模型",
+        "AI", "人工智能", "大模型", "LLM", "大语言模型",
         "ChatGPT", "GPT", "Claude", "DeepSeek", "通义千问", "文心一言",
         "机器学习", "深度学习", "AIGC", "AI绘画", "AI写作", "AGI",
         "Stable Diffusion", "Midjourney", "Sora", "AI芯片", "算力",
         "智能体", "Agent", "AI应用", "AI工具", "生成式AI", "神经网络",
         "Transformer", "OpenAI", "Anthropic", "智谱", "月之暗面", "Kimi",
         "豆包", "文心", "质谱", "AI助手", "AI搜索", "AI创业", "AI商业化",
-        # AI应用场景
         "AI医疗", "AI教育", "AI生成", "AI绘画", "AI视频", "AI音乐",
         "数字人", "虚拟人", "智能驾驶", "自动驾驶", "聊天机器人", "智能客服",
         "多模态", "GPT-4", "GPT-5", "Gemini", "文生图", "文生视频",
         "Copilot", "智能编程", "AI代码", "AI辅助",
-        # 国内AI
         "百度AI", "阿里AI", "腾讯AI", "华为AI", "字节AI", "商汤", "旷视", "云从",
         "讯飞", "科大讯飞", "AI大会", "人工智能大会",
     ],
-    "科技": [
-        # 硬件/芯片
-        "科技", "芯片", "半导体", "光刻机", "5G", "6G", "量子计算",
-        "区块链", "元宇宙", "新能源", "电动车", "电动汽车", "自动驾驶", "智能手机",
-        "电脑", "笔记本", "平板", "智能手表", "wearable",
-        "操作系统", "华为", "小米", "苹果", "谷歌", "微软", "三星",
-        "英伟达", "NVIDIA", "台积电", "中芯国际", "TSMC", "芯片制造",
-        # 汽车/新能源
-        "电池", "光伏", "储能", "火箭", "航天", "卫星", "无人机",
-        "比亚迪", "蔚来", "理想", "小鹏", "特斯拉", "增程", "纯电",
-        "新能源车", "新能源汽车", "电动汽车", "智能汽车", "车联网",
-        "充电桩", "充电设施", "锂电池", "固态电池",
-        # 互联网/软件
-        "物联网", "云计算", "大数据", "网络安全", "国产替代", "科技股",
-        "玻璃基板", "基板", "创新药", "医药", "新车", "发布会",
-        "科技企业", "科技公司", "科技部", "高新区", "专精特新", "独角兽",
-        "IPO", "科技上市", "科技融资", "科技巨头", "科技突破",
-        # 手机/消费电子
-        "iPhone", "手机", "新品发布", "旗舰机", "折叠屏", "全面屏",
-        "华为手机", "小米手机", "苹果手机", "三星手机", "OPPO", "vivo",
-        "荣耀", "realme", "一加", "努比亚",
-        # 国内科技
-        "国产芯片", "国产操作系统", "国产软件", "信创", "国产替代",
-        "科技战", "技术封锁", "科技制裁", "科技自立",
-        # 新增：热搜常见具体词
-        "苹果", "华为", "小米", "OPPO", "vivo", "荣耀", "三星", "iPhone", "iPad", "Mac",
-        "特斯拉", "比亚迪", "蔚来", "理想", "小鹏", "问界", "智界", "享界",
-        "英伟达", "英伟达", "AMD", "英特尔", "高通", "联发科",
-        "台积电", "三星电子", "中芯国际", "华虹", "长江存储",
-        "京东方", "TCL", "海信", "创维", "长虹",
-        "火山引擎", "字节", "阿里", "腾讯", "百度", "美团", "京东", "拼多多",
-        "快手", "B站", "B站", "知乎", "小红书", "抖音",
-        "SpaceX", "马斯克", "特斯拉", "星链",
-        "发布", "上市", "融资", "IPO", "市值", "股价",
-        "突破", "自研", "国产", "制裁", "禁令",
-    ],
 }
+
+CURRENCY_TERMS = ["美元", "欧元", "日元", "人民币", "汇率", "外汇"]
+TRADE_CONTEXT_TERMS = [
+    "外贸", "出口", "进口", "跨境", "贸易", "海关", "关税", "国际结算",
+    "海外订单", "外贸订单", "采购", "报价", "收款",
+]
 
 # 排除关键词（避免发无关内容）
 EXCLUDE_KEYWORDS = [
@@ -104,8 +60,21 @@ EXCLUDE_KEYWORDS = [
     "电视剧", "电影", "追剧", "热播", "大结局",
     "cos", "Cos", "COS", "cosplay", "角色扮演",
     "婚礼", "结婚", "恋情", "离婚", "演唱会", "歌手", "演员", "红毯", "穿搭", "粉丝",
+    "足球", "球队", "球员", "赛事", "比赛", "世界杯", "冠军", "奖金", "进球",
+    "查获", "藏匿", "毒品", "冰毒", "走私", "非法", "拘捕", "缉私", "活体",
+    "政务", "党委", "共产党", "基层治理", "政治协商", "人大代表", "政协委员",
+    "漫剧", "短剧", "配音", "真人剧", "影视", "追番", "动画作品",
+    "曝", "曝光", "内情", "爆料", "网传", "传闻",
     "叶文洁", "惊现", "暗藏玄机", "伦理拷问", "细思极恐",
 ]
+
+
+def _keyword_matches(title: str, keyword: str) -> bool:
+    """Match ASCII terms as tokens so AI does not match words like AirPods."""
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 .+_-]*", keyword):
+        pattern = rf"(?<![A-Za-z0-9]){re.escape(keyword)}(?![A-Za-z0-9])"
+        return re.search(pattern, title, flags=re.IGNORECASE) is not None
+    return keyword.lower() in title.lower()
 
 
 def match_category(title: str) -> str:
@@ -113,24 +82,31 @@ def match_category(title: str) -> str:
     判断标题属于哪个领域
     返回领域名称，不匹配返回 None
     """
-    title_lower = title.lower()
-
     # 先检查排除关键词
     for kw in EXCLUDE_KEYWORDS:
         if kw in title:
             return None
 
+    # Currency names alone do not make a topic foreign-trade news.
+    if any(term in title for term in CURRENCY_TERMS) and not any(
+        term in title for term in TRADE_CONTEXT_TERMS
+    ):
+        currency_only = True
+    else:
+        currency_only = False
+
     # 检查领域关键词
     matched_categories = []
     for category, keywords in CATEGORY_KEYWORDS.items():
         for kw in keywords:
-            if kw.lower() in title_lower:
+            if _keyword_matches(title, kw):
+                if category == "外贸" and currency_only and kw in CURRENCY_TERMS:
+                    continue
                 matched_categories.append(category)
                 break
 
     if matched_categories:
-        # 如果匹配多个领域，优先级：跨境电商 > 外贸 > AI > 科技
-        priority = ["跨境电商", "外贸", "AI", "科技"]
+        priority = ["跨境电商", "外贸", "AI"]
         for cat in priority:
             if cat in matched_categories:
                 try:
@@ -142,16 +118,30 @@ def match_category(title: str) -> str:
     return None
 
 
+def _hinted_category(title: str, hint: str) -> str:
+    """Accept a trusted vertical-feed hint while retaining every safety gate."""
+    if hint not in CATEGORY_KEYWORDS:
+        return None
+    if any(keyword in title for keyword in EXCLUDE_KEYWORDS):
+        return None
+    if not any(_keyword_matches(title, keyword) for keyword in CATEGORY_KEYWORDS[hint]):
+        return None
+    try:
+        validate_topic(title, hint)
+    except ContentPolicyError:
+        return None
+    return hint
+
+
 def filter_items(items: List[Dict]) -> Dict[str, List[Dict]]:
     """
     过滤热搜列表，按领域分组
-    返回: {"跨境电商": [...], "外贸": [...], "AI": [...], "科技": [...]}
+    返回: {"跨境电商": [...], "外贸": [...], "AI": [...]}
     """
     result = {
         "跨境电商": [],
         "外贸": [],
         "AI": [],
-        "科技": [],
     }
 
     seen_titles = set()  # 去重
@@ -161,7 +151,7 @@ def filter_items(items: List[Dict]) -> Dict[str, List[Dict]]:
         if not title or title in seen_titles:
             continue
 
-        category = match_category(title)
+        category = _hinted_category(title, item.get("hint_category")) or match_category(title)
         if category:
             seen_titles.add(title)
             item["category"] = category
@@ -187,11 +177,12 @@ def exclude_published_topics(
 def select_topics(filtered: Dict[str, List[Dict]], count: int = 10) -> List[Dict]:
     """
     从过滤后的热搜中选取要发布的选题
-    策略：四个领域均衡分配
+    策略：三个领域均衡分配
     """
     selected = []
-    per_category = count // 4
-    remainder = count % 4
+    category_count = max(len(filtered), 1)
+    per_category = count // category_count
+    remainder = count % category_count
 
     categories = list(filtered.keys())
     for i, cat in enumerate(categories):
