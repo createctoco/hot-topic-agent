@@ -94,6 +94,7 @@ jobs:
 
       # ====== 8. 注入头条 Cookie ======
       - name: 注入头条登录 Cookie
+        if: ${{ github.event.inputs.dry_run == 'false' }}
         env:
           TOUTIAO_COOKIES: ${{ secrets.TOUTIAO_COOKIES }}
         run: |
@@ -109,6 +110,7 @@ jobs:
 
       # ====== 9. 恢复发布历史（防重复）======
       - name: 恢复发布历史
+        if: ${{ github.event.inputs.dry_run == 'false' }}
         uses: actions/cache@v4
         with:
           path: data/published.json
@@ -155,7 +157,7 @@ jobs:
 
       # ====== 12. 保存发布历史 ======
       - name: 保存发布历史
-        if: always()
+        if: ${{ always() && github.event.inputs.dry_run == 'false' }}
         uses: actions/cache/save@v4
         with:
           path: data/published.json
