@@ -192,7 +192,7 @@ git push -u origin main
 
 在 GitHub 仓库 → Actions → "热搜手动发文" → Run workflow
 
-选择 `dry_run=true` 先测试不发布。
+默认 `dry_run=true`，只生成不发布；确认内容符合安全规则后，再显式改为 `false` 才会发布。
 
 #### 步骤 4：按需运行
 

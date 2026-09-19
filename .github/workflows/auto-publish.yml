@@ -14,7 +14,7 @@ on:
       dry_run:
         description: "仅生成不发布（true=只写文章不发头条）"
         required: false
-        default: "false"
+        default: "true"
 
 # 同一时间只允许一个实例运行
 concurrency:
@@ -127,9 +127,9 @@ jobs:
           COUNT="${{ github.event.inputs.count }}"
           DRY_RUN="${{ github.event.inputs.dry_run }}"
 
-          # 默认值（未填写时默认正式发布）
+          # 默认值（未填写时使用安全模式，只生成不发布）
           if [ -z "$COUNT" ]; then COUNT="1"; fi
-          if [ -z "$DRY_RUN" ]; then DRY_RUN="false"; fi
+          if [ -z "$DRY_RUN" ]; then DRY_RUN="true"; fi
 
           echo "发布数量: $COUNT，Dry Run: $DRY_RUN"
 
