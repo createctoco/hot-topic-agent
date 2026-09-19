@@ -1,14 +1,14 @@
-# 热搜自动发文系统
+# 热搜文章生成与手动发布系统
 
-自动采集热搜关键词 → DeepSeek AI 生成文章 → 自动发布到今日头条
+手动触发 → 采集热搜关键词 → DeepSeek AI 生成文章 → 按需发布到今日头条
 
 ## 功能
 
 - **多平台热搜采集**：百度、微博、知乎、头条
 - **智能关键词过滤**：跨境电商、外贸、AI 三个领域
 - **AI 文章生成**：DeepSeek 自动生成标题+2000-3000字正文
-- **自动发布**：通过 toutiao-ops 自动发布到今日头条
-- **定时调度**：每天 1 篇，默认北京时间 10:00
+- **手动发布**：需要时通过 toutiao-ops 发布到今日头条
+- **按需运行**：GitHub Actions 默认不自动发布，需要时手动触发
 
 ## 项目结构
 
@@ -34,7 +34,7 @@ hot-topic-agent/
 │   ├── baota_deploy.sh  # 宝塔面板部署脚本
 │   └── login_local.sh   # 本地登录脚本
 ├── .github/workflows/
-│   └── auto-publish.yml # GitHub Actions 工作流
+│   └── auto-publish.yml # GitHub Actions 手动工作流
 ├── data/
 │   ├── articles/        # 生成的文章
 │   ├── logs/            # 运行日志
@@ -180,15 +180,15 @@ git push -u origin main
 |-------------|---|
 | `DEEPSEEK_API_KEY` | 你的 DeepSeek API Key |
 
-#### 步骤 3：手动触发测试
+#### 步骤 3：手动发布
 
-在 GitHub 仓库 → Actions → "热搜自动发文" → Run workflow
+在 GitHub 仓库 → Actions → "热搜手动发文" → Run workflow
 
 选择 `dry_run=true` 先测试不发布。
 
-#### 步骤 4：自动运行
+#### 步骤 4：按需运行
 
-配置完成后，GitHub Actions 每天北京时间 10:00 自动触发一次，每次发布 1 篇。
+已移除 GitHub Actions 定时自动发布。需要发文时手动运行工作流，每次默认发布 1 篇。
 
 #### ⚠️ GitHub Actions 限制
 
@@ -235,9 +235,9 @@ python main.py                 # 启动定时调度
 
 ---
 
-## 发布时间表
+## 发布方式
 
-默认每天北京时间 10:00 发布 1 篇。手动执行仍可通过 `--count` 指定数量。
+已移除 GitHub Actions 定时自动发布。需要发布时，在 GitHub Actions 中手动运行 `热搜手动发文`，或本地执行 `python main.py --once`。发布数量可通过 `--count` 指定。
 
 ## 注意事项
 
