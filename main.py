@@ -1,6 +1,6 @@
 """
-热搜自动发文系统 - 主程序
-串联：热搜采集 → 关键词过滤 → AI生成文章 → 自动发布头条
+热搜文章生成与手动发布系统 - 主程序
+串联：热搜采集 → 安全过滤 → AI生成通用文章 → 按需发布
 """
 import os
 import sys
@@ -301,7 +301,7 @@ def run_once(config: dict, articles_count: int = None, dry_run: bool = False) ->
 def main():
     """主入口"""
     import argparse
-    parser = argparse.ArgumentParser(description="热搜自动发文系统")
+    parser = argparse.ArgumentParser(description="热搜文章安全生成与按需发布系统")
     parser.add_argument("--login", action="store_true", help="登录今日头条")
     parser.add_argument("--test-search", action="store_true", help="测试热搜采集")
     parser.add_argument("--test-filter", action="store_true", help="测试关键词过滤")

@@ -58,19 +58,67 @@ class ContentPolicyTests(unittest.TestCase):
         from modules.keyword_filter import match_category
 
         self.assertIsNone(match_category("摄像头AirPods Pro项目暂停"))
-        self.assertEqual(match_category("AI芯片推动大模型推理降本"), "AI")
+        self.assertEqual(match_category("大模型推理优化降低AI应用成本"), "AI")
 
     def test_unverified_exposure_topic_is_not_selected(self):
         from modules.keyword_filter import match_category
 
         self.assertIsNone(match_category("曝某公司将全面禁用Claude"))
 
-    def test_valid_business_topics_are_selected(self):
+    def test_valid_generic_business_topics_are_selected(self):
         from modules.keyword_filter import match_category
 
         self.assertEqual(match_category("人民币汇率波动影响外贸出口报价"), "外贸")
-        self.assertEqual(match_category("DeepSeek发布新一代大模型"), "AI")
-        self.assertEqual(match_category("亚马逊跨境卖家调整海外仓"), "跨境电商")
+        self.assertEqual(match_category("大语言模型提升客服效率"), "AI")
+        self.assertEqual(match_category("跨境卖家优化海外仓流程"), "跨境电商")
+
+    def test_blocks_named_companies_brands_and_products(self):
+        blocked = (
+            "某车企远程锁车引发投诉",
+            "希音上市市值问题引发关注",
+            "某品牌新品发布会",
+            "某公司被处罚",
+            "DeepSeek发布新一代大模型",
+            "亚马逊跨境卖家调整海外仓",
+            "iPhone 17发布新功能",
+        )
+        for title in blocked:
+            with self.subTest(title=title):
+                with self.assertRaises(ContentPolicyError):
+                    validate_topic(title, "AI")
+
+    def test_blocks_negative_business_topics(self):
+        blocked = (
+            "某平台被投诉并处罚",
+            "AI公司裁员引发争议",
+            "跨境卖家遭遇封禁风波",
+            "企业因数据泄露被起诉",
+        )
+        for title in blocked:
+            with self.subTest(title=title):
+                with self.assertRaises(ContentPolicyError):
+                    validate_topic(title, "跨境电商")
+
+    def test_blocks_brand_names_inside_article_body(self):
+        paragraphs = [
+            f"第{i}部分说明一个完整且不同的业务流程，并解释这一环节的执行方法。第{i}项核对步骤用于识别输入错误和边界条件。第{i}项执行记录用于后续复盘和持续改进。"
+            for i in range(30)
+        ]
+        content = "\n".join(paragraphs) + "\n某品牌的新品发布后引发投诉。"
+        with self.assertRaises(ContentPolicyError):
+            validate_article("通用业务流程优化方法", content, "AI")
+
+    def test_sanitizer_removes_named_entities_and_negative_claims(self):
+        content = "\n".join([
+            "AI客服可以先处理常见问题，再交给人工复核。",
+            "某品牌因远程锁车被投诉并受到处罚。",
+            "外贸团队应记录客户问题并持续更新知识库。",
+        ])
+        sanitized = sanitize_article_content(content)
+        self.assertIn("AI客服", sanitized)
+        self.assertIn("外贸团队", sanitized)
+        self.assertNotIn("某品牌", sanitized)
+        self.assertNotIn("投诉", sanitized)
 
     def test_rejects_short_or_empty_article(self):
         with self.assertRaises(ContentPolicyError):
@@ -118,16 +166,16 @@ class ContentPolicyTests(unittest.TestCase):
     def test_generated_title_cannot_invent_a_percentage(self):
         with self.assertRaises(ContentPolicyError):
             validate_generated_title(
-                "中端模型涨价，用户成本增加20%",
+                "通用模型推理效率提升20%",
                 "AI",
-                "中端模型发布变相涨价版本",
+                "通用模型优化推理流程",
             )
 
     def test_generated_title_can_retain_a_sourced_percentage(self):
         validate_generated_title(
-            "中端模型涨价20%",
+            "通用模型推理效率提升20%",
             "AI",
-            "中端模型价格上涨20%",
+            "通用模型推理效率提升20%",
         )
 
     def test_published_topic_is_removed_before_selection(self):

@@ -31,6 +31,22 @@ class AIWriterPolicyRetryTests(unittest.TestCase):
         self.assertEqual(result, "rewritten safe article")
         self.assertEqual(validator.call_count, 2)
 
+    def test_generate_title_uses_generic_fallback_for_blocked_output(self):
+        writer = AIWriter.__new__(AIWriter)
+        writer._call_api = lambda *args, **kwargs: "某车企远程锁车引发投诉"
+
+        title = writer.generate_title("AI应用通用方法", "AI")
+
+        self.assertEqual(title, "AI应用中的通用方法与实施要点")
+
+    def test_image_keywords_drop_entities_negative_terms_and_product_names(self):
+        writer = AIWriter.__new__(AIWriter)
+        writer._call_api = lambda *args, **kwargs: "比亚迪\n人工智能\n投诉\n知识库"
+
+        keywords = writer._generate_image_keywords("AI应用通用方法", "AI")
+
+        self.assertEqual(keywords, ["人工智能", "知识库", "大模型"])
+
 
 if __name__ == "__main__":
     unittest.main()
