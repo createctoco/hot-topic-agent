@@ -1,10 +1,17 @@
 # ============================================
-# 热搜手动发文 - GitHub Actions 工作流
+# 热搜定时发文 - GitHub Actions 工作流
 # ============================================
-name: 热搜手动发文
+name: 热搜定时发文
 
 on:
-  # 手动触发
+  # 定时触发（UTC时间，北京时间 = UTC+8）
+  schedule:
+    - cron: "15 0 * * *"   # 每天北京时间 08:15
+    - cron: "15 3 * * *"   # 每天北京时间 11:15
+    - cron: "15 6 * * *"   # 每天北京时间 14:15
+    - cron: "15 9 * * *"   # 每天北京时间 17:15
+    - cron: "15 12 * * *"  # 每天北京时间 20:15
+  # 手动触发（默认只生成，不发布）
   workflow_dispatch:
     inputs:
       count:
@@ -94,7 +101,7 @@ jobs:
 
       # ====== 8. 注入头条 Cookie ======
       - name: 注入头条登录 Cookie
-        if: ${{ github.event.inputs.dry_run == 'false' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.dry_run == 'false' }}
         env:
           TOUTIAO_COOKIES: ${{ secrets.TOUTIAO_COOKIES }}
         run: |
@@ -110,7 +117,7 @@ jobs:
 
       # ====== 9. 恢复发布历史（防重复）======
       - name: 恢复发布历史
-        if: ${{ github.event.inputs.dry_run == 'false' }}
+        if: ${{ github.event_name == 'schedule' || github.event.inputs.dry_run == 'false' }}
         uses: actions/cache@v4
         with:
           path: data/published.json
@@ -129,9 +136,11 @@ jobs:
           COUNT="${{ github.event.inputs.count }}"
           DRY_RUN="${{ github.event.inputs.dry_run }}"
 
-          # 默认值（未填写时使用安全模式，只生成不发布）
+          # 定时运行正式发布；手动运行未填写时使用安全模式
           if [ -z "$COUNT" ]; then COUNT="1"; fi
-          if [ -z "$DRY_RUN" ]; then DRY_RUN="true"; fi
+          if [ -z "$DRY_RUN" ]; then
+            if [ "${{ github.event_name }}" = "schedule" ]; then DRY_RUN="false"; else DRY_RUN="true"; fi
+          fi
 
           echo "发布数量: $COUNT，Dry Run: $DRY_RUN"
 
@@ -157,7 +166,7 @@ jobs:
 
       # ====== 12. 保存发布历史 ======
       - name: 保存发布历史
-        if: ${{ always() && github.event.inputs.dry_run == 'false' }}
+        if: ${{ always() && (github.event_name == 'schedule' || github.event.inputs.dry_run == 'false') }}
         uses: actions/cache/save@v4
         with:
           path: data/published.json
